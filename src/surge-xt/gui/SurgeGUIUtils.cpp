@@ -24,7 +24,7 @@
 #include "juce_core/juce_core.h"
 #include "UserDefaults.h"
 
-#if LINUX
+#if LINUX && !JUCE_QNX
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -162,7 +162,7 @@ bool openFileOrFolder(const std::string &f)
     {
         // See this for why we branch out Linux here
         // https://forum.juce.com/t/linux-spaces-in-path-startasprocess-and-process-opendocument/47296
-#if LINUX
+#if LINUX && !JUCE_QNX
         if (vfork() == 0)
         {
             if (execlp("xdg-open", "xdg-open", f.c_str(), (char *)nullptr) < 0)

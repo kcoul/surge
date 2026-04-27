@@ -62,6 +62,15 @@ juce_add_plugin(${PROJECT_NAME}
   FORMATS ${SURGE_JUCE_FORMATS}
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX" AND TARGET ${PROJECT_NAME})
+  set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "SurgeXT_SharedCode")
+  target_compile_definitions(${PROJECT_NAME} PUBLIC JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX" AND TARGET ${PROJECT_NAME}_Standalone)
+  set_target_properties(${PROJECT_NAME}_Standalone PROPERTIES OUTPUT_NAME "SurgeXT")
+endif()
+
 if(SURGE_BUILD_CLAP)
   clap_juce_extensions_plugin(TARGET surge-xt
     CLAP_ID "org.surge-synth-team.surge-xt"
@@ -201,6 +210,12 @@ target_sources(${PROJECT_NAME} PRIVATE
   osc/OpenSoundControl.h
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  target_sources(${PROJECT_NAME} PRIVATE
+    SurgeStandaloneAppQnx.cpp
+  )
+endif()
+
 if(NOT EXISTS ${SURGE_JUCE_PATH}/modules/juce_gui_basics/accessibility/juce_AccessibilityHandler.h)
   message(FATAL_ERROR "You must build against at least JUCE 6.1 with accessibility support!")
 endif()
@@ -233,10 +248,23 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   juce::juce_audio_plugin_client
   juce::juce_osc
   juce::juce_gui_basics
+  juce::juce_opengl
   juce::juce_dsp
   surge-xt-binary
   sst-filters-extras
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  target_link_libraries(${PROJECT_NAME} PRIVATE
+    screen
+    asound
+    socket
+    EGL
+    GLESv2
+    z
+    expat
+  )
+endif()
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC

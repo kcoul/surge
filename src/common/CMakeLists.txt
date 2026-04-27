@@ -13,6 +13,11 @@ surge_add_lib_subdirectory(binn)
 set(EURORACK_CLOUDS_IS_CLOUDS FALSE)
 surge_add_lib_subdirectory(eurorack)
 surge_add_lib_subdirectory(pffft)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  set(FMT_OS OFF CACHE BOOL "Disable fmt OS helpers on QNX" FORCE)
+endif()
+
 surge_add_lib_subdirectory(fmt)
 
 # Make MTS optional
@@ -287,7 +292,13 @@ if(APPLE)
 elseif(UNIX)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LINUX=1)
 
-  if(SKBUILD)
+  if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+    if(NOT SKBUILD)
+      target_link_libraries(${PROJECT_NAME} PRIVATE
+        -Wl,--no-undefined
+      )
+    endif()
+  elseif(SKBUILD)
     target_link_libraries(${PROJECT_NAME} PRIVATE
       pthread
     )

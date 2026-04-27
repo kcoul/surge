@@ -462,6 +462,9 @@ void SurgeGUIEditor::changeSelectedScene(int value)
 
 void SurgeGUIEditor::closeOrRefreshWTSEditor()
 {
+#if !HAS_LUA
+    return;
+#else
     bool hadExtendedOverlay = false;
     bool wasTornOut = false;
     juce::Point<int> tearOutLoc;
@@ -504,6 +507,7 @@ void SurgeGUIEditor::closeOrRefreshWTSEditor()
             }
         }
     }
+#endif
 }
 
 void SurgeGUIEditor::refreshSkin()

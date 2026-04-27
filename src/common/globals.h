@@ -33,10 +33,15 @@
 
 #include "sst/basic-blocks/simd/setup.h"
 
-#if MAC || LINUX
+#if (MAC || LINUX) && !defined(__QNXNTO__)
 #include <strings.h>
 
 static inline int _stricmp(const char *s1, const char *s2) { return strcasecmp(s1, s2); }
+#endif
+
+#if defined(__QNXNTO__)
+#include <strings.h>
+#define _stricmp strcasecmp
 #endif
 
 #define _SURGE_STR(x) #x

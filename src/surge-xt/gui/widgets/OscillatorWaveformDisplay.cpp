@@ -771,6 +771,7 @@ void OscillatorWaveformDisplay::createWTRenameMenu(juce::PopupMenu &contextMenu)
 
 void OscillatorWaveformDisplay::createOpenScriptEditorMenu(juce::PopupMenu &contextMenu)
 {
+#if HAS_LUA
     auto owts = [this]() {
         if (sge)
             sge->showOverlay(SurgeGUIEditor::WTS_EDITOR);
@@ -781,6 +782,9 @@ void OscillatorWaveformDisplay::createOpenScriptEditorMenu(juce::PopupMenu &cont
         sge->getShortcutDescription(Surge::GUI::KeyboardActions::TOGGLE_WTS_EDITOR), owts);
 
     contextMenu.addSeparator();
+#else
+    juce::ignoreUnused(contextMenu);
+#endif
 }
 
 void OscillatorWaveformDisplay::refreshWavetablesMenu(juce::PopupMenu &contextMenu)

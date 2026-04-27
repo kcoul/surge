@@ -9,7 +9,8 @@
 	url = https://github.com/fmtlib/fmt.git
 [submodule "libs/JUCE"]
 	path = libs/JUCE
-	url = https://github.com/surge-synthesizer/JUCE
+	url = https://github.com/kcoul/JUCE.git
+	branch = qnx-ports
 [submodule "libs/luajitlib/LuaJIT"]
 	path = libs/luajitlib/LuaJIT
 	url = https://github.com/LuaJIT/LuaJIT.git
@@ -40,13 +41,13 @@
 	url = https://github.com/surge-synthesizer/sst-cpputils
 [submodule "libs/sst/sst-effects"]
 	path = libs/sst/sst-effects
-	url = https://github.com/surge-synthesizer/sst-effects
+	url = https://github.com/kcoul/sst-effects.git
 [submodule "libs/sst/sst-filters"]
 	path = libs/sst/sst-filters
-	url = https://github.com/surge-synthesizer/sst-filters
+	url = https://github.com/kcoul/sst-filters.git
 [submodule "libs/sst/sst-plugininfra"]
 	path = libs/sst/sst-plugininfra
-	url = https://github.com/surge-synthesizer/sst-plugininfra
+	url = https://github.com/kcoul/sst-plugininfra.git
 [submodule "libs/sst/sst-waveshapers"]
 	path = libs/sst/sst-waveshapers
 	url = https://github.com/surge-synthesizer/sst-waveshapers

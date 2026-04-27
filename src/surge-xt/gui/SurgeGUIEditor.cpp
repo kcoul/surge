@@ -834,6 +834,7 @@ void SurgeGUIEditor::idle()
         {
             wt->refresh_script_editor = false;
 
+#if HAS_LUA
             this->synth->storage.getPatch().dawExtraState.editor.clearWTSEStateInScene(
                 current_scene, current_osc[current_scene]);
 
@@ -841,6 +842,7 @@ void SurgeGUIEditor::idle()
             {
                 ol->forceRefresh();
             }
+#endif
         }
 
         if (polydisp)

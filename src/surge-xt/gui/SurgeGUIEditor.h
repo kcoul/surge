@@ -55,8 +55,10 @@
 #include <bitset>
 #include "UndoManager.h"
 
-// Change this to 0 to disable WTSE component, to disable for release: change value, test, and push
+// Allow the build system to disable Lua support on unsupported platforms.
+#ifndef HAS_LUA
 #define HAS_LUA 1
+#endif
 
 class SurgeSynthEditor;
 

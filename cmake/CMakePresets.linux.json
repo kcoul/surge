@@ -5,8 +5,8 @@
   ],
   "configurePresets": [
     {
-      "name": "host-juceaide-ninja-linux",
-      "displayName": "Host juceaide (Ninja, Linux)",
+      "name": "host-juceaide-linux",
+      "displayName": "Host juceaide (Linux)",
       "inherits": [
         "host-juceaide-common"
       ],
@@ -41,18 +41,18 @@
         "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
       },
       "cacheVariables": {
-        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/extras/Build/juceaide/juceaide_artefacts/juceaide"
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/JUCE-host/extras/Build/juceaide/juceaide_artefacts/juceaide"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "build-host-juceaide-ninja-linux",
-      "displayName": "Build host juceaide (Ninja, Linux)",
+      "name": "build-host-juceaide-linux",
+      "displayName": "Build host juceaide (Linux)",
       "inherits": [
         "common"
       ],
-      "configurePreset": "host-juceaide-ninja-linux",
+      "configurePreset": "host-juceaide-linux",
       "targets": [
         "juceaide"
       ],
@@ -74,6 +74,15 @@
         "surge-xt_Standalone"
       ],
       "jobs": 4,
+      "environment": {
+        "QNX_BASE": "$env{HOME}/qnx800",
+        "QNX_HOST": "$env{HOME}/qnx800/host/linux/x86_64",
+        "QNX_TARGET": "$env{HOME}/qnx800/target/qnx",
+        "QNX_CONFIGURATION": "$env{HOME}/.qnx",
+        "QNX_CONFIGURATION_EXCLUSIVE": "$env{HOME}/.qnx",
+        "MAKEFLAGS": "",
+        "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",

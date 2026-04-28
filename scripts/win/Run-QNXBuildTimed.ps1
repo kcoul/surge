@@ -4,6 +4,7 @@ param(
     [string]$LogFile = $null,
     [string]$ToolchainFile = $null,
     [string]$NinjaPath = 'C:\ninja-win\ninja.exe',
+    [string]$CMakeExe = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe',
     [int]$HeartbeatSeconds = 60
 )
 
@@ -109,8 +110,10 @@ try {
     Write-LogLine "QNX_TARGET=$env:QNX_TARGET"
     Write-LogLine "CMAKE_MAKE_PROGRAM=$env:CMAKE_MAKE_PROGRAM"
     Write-LogLine "resolving cmake.exe"
-    $cmakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
-    Write-LogLine "cmake.exe resolved to $cmakeExe"
+    if (-not (Test-Path -LiteralPath $CMakeExe)) {
+        $CMakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
+    }
+    Write-LogLine "cmake.exe resolved to $CMakeExe"
 
     $configureArgs = @(
         '-S', $RepoRoot,
@@ -135,12 +138,12 @@ try {
     )
 
     Write-LogLine "configure phase uses native juceaide import"
-    $configureExit = Invoke-TimedCommand -Phase 'configure' -Executable $cmakeExe -CommandArgs $configureArgs -WorkingDirectory $RepoRoot
+    $configureExit = Invoke-TimedCommand -Phase 'configure' -Executable $CMakeExe -CommandArgs $configureArgs -WorkingDirectory $RepoRoot
     if ($configureExit -ne 0) {
         exit $configureExit
     }
 
-    $buildExit = Invoke-TimedCommand -Phase 'build' -Executable $cmakeExe -CommandArgs $buildArgs -WorkingDirectory $RepoRoot
+    $buildExit = Invoke-TimedCommand -Phase 'build' -Executable $CMakeExe -CommandArgs $buildArgs -WorkingDirectory $RepoRoot
     exit $buildExit
 }
 catch {

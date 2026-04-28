@@ -1,7 +1,8 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$BuildDir = $null,
-    [string]$NinjaPath = 'C:\ninja-win\ninja.exe'
+    [string]$NinjaPath = 'C:\ninja-win\ninja.exe',
+    [string]$CMakeExe = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,14 +13,16 @@ if (-not $BuildDir) {
 
 . (Join-Path $PSScriptRoot 'Set-VSBuildEnv.ps1')
 
-$cmakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
+if (-not (Test-Path -LiteralPath $CMakeExe)) {
+    $CMakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
+}
 $juceaideSource = Join-Path $RepoRoot 'libs\JUCE'
 $pathFile = Join-Path $BuildDir 'juceaide-path.txt'
 
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
 Write-Host "Configuring native juceaide in $BuildDir"
-& $cmakeExe -S $juceaideSource -B $BuildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=$NinjaPath -DJUCE_BUILD_HELPER_TOOLS=ON -DJUCE_BUILD_EXTRAS=OFF -DJUCE_BUILD_EXAMPLES=OFF
+& $cmakeExe -S $juceaideSource -B $BuildDir -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=$NinjaPath" -DJUCE_BUILD_HELPER_TOOLS=ON -DJUCE_BUILD_EXTRAS=OFF -DJUCE_BUILD_EXAMPLES=OFF
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

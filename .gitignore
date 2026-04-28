@@ -111,3 +111,4 @@ installer-tmp/
 .junie/
 
 /build-qnx-surge-xt-nolua/*
+/build-qnx-surge-xt-nolua-*/*

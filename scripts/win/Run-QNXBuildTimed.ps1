@@ -1,10 +1,16 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$BuildDir = $null,
+    [string]$HostBuildDir = $null,
     [string]$LogFile = $null,
     [string]$ToolchainFile = $null,
     [string]$NinjaPath = 'C:\ninja-win\ninja.exe',
     [string]$CMakeExe = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe',
+    [ValidateSet('Ninja', 'NMake')]
+    [string]$HostGenerator = 'Ninja',
+    [ValidateSet('Ninja', 'NMake')]
+    [string]$TargetGenerator = 'Ninja',
+    [switch]$ForcePlatformFilesystem,
     [int]$HeartbeatSeconds = 60
 )
 
@@ -18,7 +24,13 @@ if (-not [System.IO.Path]::IsPathRooted($RepoRoot)) {
 }
 
 if (-not $BuildDir) {
-    $BuildDir = Join-Path $RepoRoot 'build-qnx-surge-xt-nolua'
+    $defaultTargetDirName = if ($TargetGenerator -eq 'NMake') { 'build-qnx-surge-xt-nolua-nmake' } else { 'build-qnx-surge-xt-nolua' }
+    $BuildDir = Join-Path $RepoRoot $defaultTargetDirName
+}
+
+if (-not $HostBuildDir) {
+    $defaultHostDirName = if ($HostGenerator -eq 'NMake') { 'libs\JUCE\build-host-juceaide-nmake' } else { 'libs\JUCE\build-host-juceaide-clean' }
+    $HostBuildDir = Join-Path $RepoRoot $defaultHostDirName
 }
 
 if (-not $LogFile) {
@@ -82,17 +94,32 @@ function Invoke-TimedCommand {
 try {
     Set-Content -LiteralPath $LogFile -Value ("[{0}] starting timed QNX build" -f (Get-Date -Format 'ddd MM/dd/yyyy HH:mm:ss.fff'))
     Write-LogLine "repo root: $RepoRoot"
+    Write-LogLine "host generator: $HostGenerator"
+    Write-LogLine "target generator: $TargetGenerator"
+    Write-LogLine "host build dir: $HostBuildDir"
     Write-LogLine "build dir: $BuildDir"
     Write-LogLine "toolchain: $ToolchainFile"
     Write-LogLine "ninja: $NinjaPath"
     Write-LogLine "building native juceaide first"
     $hostJuceaideScript = Join-Path $PSScriptRoot 'Build-HostJuceaide.ps1'
-    $hostJuceaideExit = Invoke-TimedCommand -Phase 'host-juceaide' -Executable 'powershell.exe' -CommandArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $hostJuceaideScript, '-RepoRoot', $RepoRoot) -WorkingDirectory $RepoRoot
+    $hostJuceaideArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', $hostJuceaideScript,
+        '-RepoRoot', $RepoRoot,
+        '-BuildDir', $HostBuildDir,
+        '-Generator', $HostGenerator,
+        '-CMakeExe', $CMakeExe
+    )
+    if ($HostGenerator -eq 'Ninja') {
+        $hostJuceaideArgs += @('-NinjaPath', $NinjaPath)
+    }
+
+    $hostJuceaideExit = Invoke-TimedCommand -Phase 'host-juceaide' -Executable 'powershell.exe' -CommandArgs $hostJuceaideArgs -WorkingDirectory $RepoRoot
     if ($hostJuceaideExit -ne 0) {
         throw "Host juceaide build failed with exit code $hostJuceaideExit"
     }
 
-    $hostJuceaidePathFile = Join-Path $RepoRoot 'libs\JUCE\build-host-juceaide-clean\juceaide-path.txt'
+    $hostJuceaidePathFile = Join-Path $HostBuildDir 'juceaide-path.txt'
     if (-not (Test-Path -LiteralPath $hostJuceaidePathFile)) {
         throw "Host juceaide path file not found: $hostJuceaidePathFile"
     }
@@ -109,6 +136,10 @@ try {
     Write-LogLine "QNX_HOST=$env:QNX_HOST"
     Write-LogLine "QNX_TARGET=$env:QNX_TARGET"
     Write-LogLine "CMAKE_MAKE_PROGRAM=$env:CMAKE_MAKE_PROGRAM"
+    if ($TargetGenerator -ne 'Ninja') {
+        Remove-Item Env:CMAKE_MAKE_PROGRAM -ErrorAction SilentlyContinue
+        Write-LogLine "CMAKE_MAKE_PROGRAM cleared for $TargetGenerator target generator"
+    }
     Write-LogLine "resolving cmake.exe"
     if (-not (Test-Path -LiteralPath $CMakeExe)) {
         $CMakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
@@ -118,9 +149,8 @@ try {
     $configureArgs = @(
         '-S', $RepoRoot,
         '-B', $BuildDir,
-        '-G', 'Ninja',
+        '-G', $TargetGenerator,
         '-DCMAKE_BUILD_TYPE=Release',
-        '-DCMAKE_MAKE_PROGRAM=C:/ninja-win/ninja.exe',
         "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile",
         "-DJUCE_JUCEAIDE_PATH=$hostJuceaidePath",
         '-DSURGE_BUILD_FX=OFF',
@@ -130,12 +160,23 @@ try {
         '-DSURGE_SKIP_LUA=TRUE'
     )
 
+    if ($TargetGenerator -eq 'Ninja') {
+        $configureArgs += '-DCMAKE_MAKE_PROGRAM=C:/ninja-win/ninja.exe'
+    }
+
+    if ($ForcePlatformFilesystem) {
+        $configureArgs += '-DSST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM=ON'
+    }
+
     $buildArgs = @(
         '--build', $BuildDir,
         '--config', 'Release',
-        '--target', 'surge-xt_Standalone',
-        '--parallel', '4'
+        '--target', 'surge-xt_Standalone'
     )
+
+    if ($TargetGenerator -eq 'Ninja') {
+        $buildArgs += @('--parallel', '4')
+    }
 
     Write-LogLine "configure phase uses native juceaide import"
     $configureExit = Invoke-TimedCommand -Phase 'configure' -Executable $CMakeExe -CommandArgs $configureArgs -WorkingDirectory $RepoRoot

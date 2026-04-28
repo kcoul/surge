@@ -21,11 +21,18 @@ endif()
 project(Surge VERSION 1.4.0 LANGUAGES C CXX)
 
 option(SURGE_HOST_JUCEAIDE_ONLY "Configure only the host-side JUCE juceaide helper" OFF)
+option(SURGE_HOST_MIDI_OSC_BRIDGE_ONLY "Configure only the host-side MIDI to OSC bridge utility" OFF)
 
 if(SURGE_HOST_JUCEAIDE_ONLY)
   set(SURGE_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE STRING "Path to JUCE library source tree")
   message(STATUS "Host-only juceaide configure using JUCE from ${SURGE_JUCE_PATH}")
   add_subdirectory(${SURGE_JUCE_PATH} ${CMAKE_BINARY_DIR}/JUCE-host)
+  return()
+endif()
+
+if(SURGE_HOST_MIDI_OSC_BRIDGE_ONLY)
+  message(STATUS "Host-only MIDI to OSC bridge configure")
+  add_subdirectory(extras/SurgeMidiToOscBridge)
   return()
 endif()
 

@@ -19,6 +19,20 @@
       }
     },
     {
+      "name": "host-midi-osc-bridge-linux",
+      "displayName": "Host MIDI to OSC bridge (Linux)",
+      "inherits": [
+        "host-midi-osc-bridge-common"
+      ],
+      "binaryDir": "${sourceDir}/extras/SurgeMidiToOscBridge/build",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "qnx-surge-linux",
       "displayName": "QNX Surge XT (Linux host)",
       "inherits": [
@@ -55,6 +69,23 @@
       "configurePreset": "host-juceaide-linux",
       "targets": [
         "juceaide"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "build-host-midi-osc-bridge-linux",
+      "displayName": "Build host MIDI to OSC bridge (Linux)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "host-midi-osc-bridge-linux",
+      "targets": [
+        "SurgeMidiToOscBridge"
       ],
       "jobs": 4,
       "condition": {

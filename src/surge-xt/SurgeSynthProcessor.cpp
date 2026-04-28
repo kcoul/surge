@@ -190,6 +190,19 @@ SurgeSynthProcessor::SurgeSynthProcessor()
 
     midiKeyboardState.addListener(this);
     oscHandler.initOSC(this, surge);
+
+#if defined(__QNXNTO__)
+    if (wrapperType == juce::AudioProcessor::wrapperType_Standalone
+        && ! surge->storage.oscReceiving
+        && ! surge->storage.oscStartIn)
+    {
+        const auto oscPort = surge->storage.oscPortIn > 0 ? surge->storage.oscPortIn
+                                                           : DEFAULT_OSC_PORT_IN;
+
+        if (! initOSCIn(oscPort))
+            initOSCError(oscPort);
+    }
+#endif
 }
 
 SurgeSynthProcessor::~SurgeSynthProcessor()

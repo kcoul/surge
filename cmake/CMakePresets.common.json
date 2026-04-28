@@ -22,6 +22,16 @@
       }
     },
     {
+      "name": "host-midi-osc-bridge-common",
+      "hidden": true,
+      "inherits": [
+        "common"
+      ],
+      "cacheVariables": {
+        "SURGE_HOST_MIDI_OSC_BRIDGE_ONLY": "ON"
+      }
+    },
+    {
       "name": "qnx-surge-common",
       "hidden": true,
       "inherits": [

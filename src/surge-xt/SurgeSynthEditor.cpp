@@ -31,6 +31,7 @@
 #include <version.h>
 #include "gui/widgets/CurrentFxDisplay.h"
 #include "gui/widgets/MainFrame.h"
+#include <cmath>
 
 struct VKeyboardWheel : public juce::Component
 {
@@ -134,6 +135,49 @@ struct VKeyboardSus : public juce::Component
 
 static std::weak_ptr<SurgeJUCELookAndFeel> surgeLookAndFeelWeakPointer;
 static std::mutex surgeLookAndFeelSetupMutex;
+
+namespace
+{
+juce::ResizableWindow* findHostingResizableWindow (juce::Component* component)
+{
+    for (auto* current = component; current != nullptr; current = current->getParentComponent())
+        if (auto* window = dynamic_cast<juce::ResizableWindow*> (current))
+            return window;
+
+    return nullptr;
+}
+
+bool boundsNearlyMatch (const juce::Rectangle<int>& lhs,
+                        const juce::Rectangle<int>& rhs,
+                        int tolerance = 2)
+{
+    return std::abs (lhs.getX() - rhs.getX()) <= tolerance
+        && std::abs (lhs.getY() - rhs.getY()) <= tolerance
+        && std::abs (lhs.getWidth() - rhs.getWidth()) <= tolerance
+        && std::abs (lhs.getHeight() - rhs.getHeight()) <= tolerance;
+}
+
+bool shouldUseDisplayFittedStandaloneLayout (SurgeSynthEditor& editor, juce::ResizableWindow& window)
+{
+    if (window.isFullScreen())
+        return true;
+
+#if defined(__QNXNTO__)
+    if (editor.processor.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
+    {
+        if (auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (window.getScreenBounds()))
+        {
+            const auto displayBounds = display->logicalBounds.getSmallestIntegerContainer();
+
+            if (! displayBounds.isEmpty() && boundsNearlyMatch (window.getScreenBounds(), displayBounds))
+                return true;
+        }
+    }
+#endif
+
+    return false;
+}
+}
 
 //==============================================================================
 SurgeSynthEditor::SurgeSynthEditor(SurgeSynthProcessor &p)
@@ -419,47 +463,35 @@ void SurgeSynthEditor::resized()
 
     if (Surge::GUI::getIsStandalone())
     {
-        juce::Component *comp = this;
-        while (comp)
+        if (auto* hostingWindow = findHostingResizableWindow (this))
         {
-            auto *cdw = dynamic_cast<juce::ResizableWindow *>(comp);
-            if (cdw)
+            if (shouldUseDisplayFittedStandaloneLayout (*this, *hostingWindow))
             {
-                if (cdw->isFullScreen())
-                {
-                    auto b = getLocalBounds();
-                    auto xw = 1.f * sge->getWindowSizeX() / b.getWidth();
-                    auto xh = 1.f *
-                              (sge->getWindowSizeY() +
-                               (drawExtendedControls ? extraYSpaceForVirtualKeyboard : 0)) /
-                              b.getHeight();
+                auto b = getLocalBounds();
+                auto xw = 1.f * sge->getWindowSizeX() / b.getWidth();
+                auto xh = 1.f *
+                          (sge->getWindowSizeY() +
+                           (drawExtendedControls ? extraYSpaceForVirtualKeyboard : 0)) /
+                          b.getHeight();
 
-                    auto nz = std::min(1.0 / xw, 1.0 / xh);
-                    auto snz = nz / sge->getZoomFactor() * 100.f;
+                auto nz = std::min(1.0 / xw, 1.0 / xh);
+                auto snz = nz / sge->getZoomFactor() * 100.f;
 
-                    topLevelContainer->setTransform(juce::AffineTransform().scaled(snz));
+                topLevelContainer->setTransform(juce::AffineTransform().scaled(snz));
 
-                    // target width
-                    auto tw = sge->getWindowSizeX() * sge->getZoomFactor() * 0.01 * snz;
-                    auto th = (sge->getWindowSizeY() +
-                               (drawExtendedControls ? extraYSpaceForVirtualKeyboard : 0)) *
-                              sge->getZoomFactor() * 0.01 * snz;
+                auto tw = sge->getWindowSizeX() * sge->getZoomFactor() * 0.01 * snz;
+                auto th = (sge->getWindowSizeY() +
+                           (drawExtendedControls ? extraYSpaceForVirtualKeyboard : 0)) *
+                          sge->getZoomFactor() * 0.01 * snz;
 
-                    auto pw = (b.getWidth() - tw) / 2.0;
-                    auto ph = (b.getHeight() - th) / 2.0;
+                auto pw = (b.getWidth() - tw) / 2.0;
+                auto ph = (b.getHeight() - th) / 2.0;
 
-                    // turn off aspect ratio
-                    if (getConstrainer())
-                        getConstrainer()->setFixedAspectRatio(0.f);
+                if (getConstrainer())
+                    getConstrainer()->setFixedAspectRatio(0.f);
 
-                    sge->moveTopLeftTo(std::round(pw / snz), std::round(ph / snz));
-                    return;
-                }
-                comp = nullptr;
-            }
-            else
-            {
-                comp = comp->getParentComponent();
+                sge->moveTopLeftTo(std::round(pw / snz), std::round(ph / snz));
+                return;
             }
         }
 

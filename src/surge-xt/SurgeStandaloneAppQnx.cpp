@@ -47,14 +47,14 @@ juce::Rectangle<int> getPrimaryDisplayArea()
     return { 0, 0, 1280, 1024 };
 }
 
-void applyPseudoFullscreenBounds (juce::ResizableWindow& window)
+void applyDisplayBounds (juce::ResizableWindow& window)
 {
     const auto displayArea = getPrimaryDisplayArea();
     const auto currentBounds = window.getBounds();
 
     if (currentBounds != displayArea)
     {
-        juce::Logger::writeToLog ("Applying QNX pseudo-fullscreen bounds: " + displayArea.toString()
+        juce::Logger::writeToLog ("Applying QNX display bounds: " + displayArea.toString()
                                   + " (was " + currentBounds.toString() + ")");
         window.setBounds (displayArea);
     }
@@ -75,8 +75,7 @@ public:
         : StandaloneFilterWindow (title, backgroundColour, std::move (pluginHolderIn)),
           shouldEnableOpenGL (shouldEnableOpenGLIn)
     {
-        setFullScreen (true);
-        applyPseudoFullscreenBounds (*this);
+        updateDisplayLayout();
 
         if (shouldEnableOpenGL)
         {
@@ -97,23 +96,41 @@ public:
     void resized() override
     {
         StandaloneFilterWindow::resized();
-        applyPseudoFullscreenBounds (*this);
+        updateDisplayLayout();
         tryAttachOpenGLIfReady();
     }
 
     void visibilityChanged() override
     {
         StandaloneFilterWindow::visibilityChanged();
+        updateDisplayLayout();
         tryAttachOpenGLIfReady();
     }
 
     void parentHierarchyChanged() override
     {
         StandaloneFilterWindow::parentHierarchyChanged();
+        updateDisplayLayout();
         tryAttachOpenGLIfReady();
     }
 
 private:
+    void updateDisplayLayout()
+    {
+        if (isUpdatingDisplayLayout)
+            return;
+
+        const juce::ScopedValueSetter<bool> guard (isUpdatingDisplayLayout, true);
+
+        if (! isFullScreen())
+        {
+            Logger::writeToLog ("Marking QNX standalone window as fullscreen for layout");
+            setFullScreen (true);
+        }
+
+        applyDisplayBounds (*this);
+    }
+
     void newOpenGLContextCreated() override
     {
         isOpenGLActive = true;
@@ -192,6 +209,7 @@ private:
     bool shouldEnableOpenGL = false;
     bool openGLAttachAttempted = false;
     double openGLAttachStartMs = 0.0;
+    bool isUpdatingDisplayLayout = false;
 };
 
 class SurgeQnxStandaloneApp final : public JUCEApplication
@@ -260,7 +278,7 @@ public:
                                                       createPluginHolder(),
                                                       rendererMode == "opengl");
 
-        Logger::writeToLog ("QNX standalone window created in pseudo-fullscreen mode");
+        Logger::writeToLog ("QNX standalone window created in fullscreen-display mode");
 
         Logger::writeToLog ("StandaloneFilterWindow created");
         return window;

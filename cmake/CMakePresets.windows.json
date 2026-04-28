@@ -10,7 +10,7 @@
       "inherits": [
         "host-juceaide-common"
       ],
-      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-clean",
+      "binaryDir": "${sourceDir}/libs/JUCE/build",
       "generator": "Ninja",
       "condition": {
         "type": "equals",
@@ -27,7 +27,7 @@
       "inherits": [
         "host-juceaide-common"
       ],
-      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-nmake",
+      "binaryDir": "${sourceDir}/libs/JUCE/build",
       "generator": "NMake Makefiles",
       "condition": {
         "type": "equals",
@@ -41,7 +41,7 @@
       "inherits": [
         "qnx-surge-common"
       ],
-      "binaryDir": "${sourceDir}/build-qnx-surge-xt-nolua",
+      "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "condition": {
         "type": "equals",
@@ -59,7 +59,7 @@
       },
       "cacheVariables": {
         "CMAKE_MAKE_PROGRAM": "C:/ninja-win/ninja.exe",
-        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build-host-juceaide-clean/extras/Build/juceaide/juceaide_artefacts/Release/juceaide.exe"
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/extras/Build/juceaide/juceaide_artefacts/Release/juceaide.exe"
       }
     }
   ],

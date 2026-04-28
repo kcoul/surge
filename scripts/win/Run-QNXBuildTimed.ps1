@@ -24,17 +24,15 @@ if (-not [System.IO.Path]::IsPathRooted($RepoRoot)) {
 }
 
 if (-not $BuildDir) {
-    $defaultTargetDirName = if ($TargetGenerator -eq 'NMake') { 'build-qnx-surge-xt-nolua-nmake' } else { 'build-qnx-surge-xt-nolua' }
-    $BuildDir = Join-Path $RepoRoot $defaultTargetDirName
+    $BuildDir = Join-Path $RepoRoot 'build'
 }
 
 if (-not $HostBuildDir) {
-    $defaultHostDirName = if ($HostGenerator -eq 'NMake') { 'libs\JUCE\build-host-juceaide-nmake' } else { 'libs\JUCE\build-host-juceaide-clean' }
-    $HostBuildDir = Join-Path $RepoRoot $defaultHostDirName
+    $HostBuildDir = Join-Path $RepoRoot 'libs\JUCE\build'
 }
 
 if (-not $LogFile) {
-    $LogFile = Join-Path $RepoRoot 'build-qnx-surge-xt-nolua.log'
+    $LogFile = Join-Path $RepoRoot 'build-qnx-surge.log'
 }
 
 if (-not $ToolchainFile) {

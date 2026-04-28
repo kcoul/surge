@@ -10,7 +10,7 @@
       "inherits": [
         "host-juceaide-common"
       ],
-      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-linux",
+      "binaryDir": "${sourceDir}/libs/JUCE/build",
       "generator": "Ninja",
       "condition": {
         "type": "equals",
@@ -24,7 +24,7 @@
       "inherits": [
         "qnx-surge-common"
       ],
-      "binaryDir": "${sourceDir}/build-qnx-surge-xt-nolua-linux",
+      "binaryDir": "${sourceDir}/build",
       "generator": "Ninja",
       "condition": {
         "type": "equals",
@@ -41,7 +41,7 @@
         "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
       },
       "cacheVariables": {
-        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build-host-juceaide-linux/extras/Build/juceaide/juceaide_artefacts/juceaide"
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/extras/Build/juceaide/juceaide_artefacts/juceaide"
       }
     }
   ],

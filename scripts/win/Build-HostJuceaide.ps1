@@ -10,8 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $BuildDir) {
-    $defaultDirName = if ($Generator -eq 'NMake') { 'build-host-juceaide-nmake' } else { 'build-host-juceaide-clean' }
-    $BuildDir = Join-Path $RepoRoot "libs\JUCE\$defaultDirName"
+    $BuildDir = Join-Path $RepoRoot 'libs\JUCE\build'
 }
 
 if (-not (Test-Path -LiteralPath $CMakeExe)) {

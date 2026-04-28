@@ -17,15 +17,20 @@ juce_add_binary_data(surge-xt-binary
   SOURCES ${SURGE_XT_JUCE_RESOURCES_GLOB}
 )
 
-if(WIN32 AND ${CMAKE_SIZEOF_VOID_P} EQUAL 4)
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  set(SURGE_XT_PRODUCT_NAME "SurgeXT")
+  set(SURGE_XT_COMPANY_NAME "SurgeSynthTeam")
+elseif(WIN32 AND ${CMAKE_SIZEOF_VOID_P} EQUAL 4)
   set(SURGE_XT_PRODUCT_NAME "Surge XT (32-bit)")
+  set(SURGE_XT_COMPANY_NAME "Surge Synth Team")
 else()
   set(SURGE_XT_PRODUCT_NAME "Surge XT")
+  set(SURGE_XT_COMPANY_NAME "Surge Synth Team")
 endif()
 
 juce_add_plugin(${PROJECT_NAME}
   PRODUCT_NAME ${SURGE_XT_PRODUCT_NAME}
-  COMPANY_NAME "Surge Synth Team"
+  COMPANY_NAME ${SURGE_XT_COMPANY_NAME}
   COMPANY_WEBSITE "https://surge-synth-team.org/"
   BUNDLE_ID "org.surge-synth-team.surge-xt"
   PLUGIN_MANUFACTURER_CODE VmbA

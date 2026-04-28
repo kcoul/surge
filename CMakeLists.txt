@@ -20,6 +20,15 @@ endif()
 
 project(Surge VERSION 1.4.0 LANGUAGES C CXX)
 
+option(SURGE_HOST_JUCEAIDE_ONLY "Configure only the host-side JUCE juceaide helper" OFF)
+
+if(SURGE_HOST_JUCEAIDE_ONLY)
+  set(SURGE_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE STRING "Path to JUCE library source tree")
+  message(STATUS "Host-only juceaide configure using JUCE from ${SURGE_JUCE_PATH}")
+  add_subdirectory(${SURGE_JUCE_PATH} ${CMAKE_BINARY_DIR}/JUCE-host)
+  return()
+endif()
+
 # Banner {{{
 message(STATUS "It's Surge XT, folks! Version is ${PROJECT_VERSION}.")
 message(STATUS "CMAKE_BUILD_TYPE is ${CMAKE_BUILD_TYPE}.")

@@ -1,0 +1,48 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "common",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "host-juceaide-common",
+      "hidden": true,
+      "inherits": [
+        "common"
+      ],
+      "cacheVariables": {
+        "SURGE_HOST_JUCEAIDE_ONLY": "ON",
+        "JUCE_BUILD_HELPER_TOOLS": "ON",
+        "JUCE_BUILD_EXTRAS": "OFF",
+        "JUCE_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "qnx-surge-common",
+      "hidden": true,
+      "inherits": [
+        "common"
+      ],
+      "toolchainFile": "${sourceDir}/libs/JUCE/extras/Build/CMake/QNXAarch64Toolchain.cmake",
+      "cacheVariables": {
+        "SURGE_BUILD_FX": "OFF",
+        "SURGE_BUILD_TESTRUNNER": "OFF",
+        "SURGE_BUILD_CLAP": "OFF",
+        "SURGE_BUILD_LV2": "OFF",
+        "SURGE_SKIP_LUA": "TRUE",
+        "SST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "common",
+      "hidden": true,
+      "inheritConfigureEnvironment": true
+    }
+  ]
+}

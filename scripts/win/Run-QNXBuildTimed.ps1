@@ -100,6 +100,8 @@ try {
     Write-LogLine "build dir: $BuildDir"
     Write-LogLine "toolchain: $ToolchainFile"
     Write-LogLine "ninja: $NinjaPath"
+    $runQnxBuildCmd = Join-Path $PSScriptRoot 'Run-QNXBuild.cmd'
+    Write-LogLine "qnx wrapper: $runQnxBuildCmd"
     Write-LogLine "building native juceaide first"
     $hostJuceaideScript = Join-Path $PSScriptRoot 'Build-HostJuceaide.ps1'
     $hostJuceaideArgs = @(
@@ -130,21 +132,18 @@ try {
     }
 
     Write-LogLine "native juceaide: $hostJuceaidePath"
-
-    . (Join-Path $PSScriptRoot 'Set-QNXBuildEnv.ps1')
-
-    Write-LogLine "QNX_HOST=$env:QNX_HOST"
-    Write-LogLine "QNX_TARGET=$env:QNX_TARGET"
-    Write-LogLine "CMAKE_MAKE_PROGRAM=$env:CMAKE_MAKE_PROGRAM"
-    if ($TargetGenerator -ne 'Ninja') {
-        Remove-Item Env:CMAKE_MAKE_PROGRAM -ErrorAction SilentlyContinue
-        Write-LogLine "CMAKE_MAKE_PROGRAM cleared for $TargetGenerator target generator"
-    }
     Write-LogLine "resolving cmake.exe"
     if (-not (Test-Path -LiteralPath $CMakeExe)) {
         $CMakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
     }
     Write-LogLine "cmake.exe resolved to $CMakeExe"
+    if ($TargetGenerator -eq 'Ninja') {
+        $env:CMAKE_MAKE_PROGRAM = $NinjaPath
+        Write-LogLine "CMAKE_MAKE_PROGRAM set to $NinjaPath for $TargetGenerator target generator"
+    } else {
+        Remove-Item Env:CMAKE_MAKE_PROGRAM -ErrorAction SilentlyContinue
+        Write-LogLine "CMAKE_MAKE_PROGRAM cleared for $TargetGenerator target generator"
+    }
 
     $configureArgs = @(
         '-S', $RepoRoot,
@@ -179,12 +178,14 @@ try {
     }
 
     Write-LogLine "configure phase uses native juceaide import"
-    $configureExit = Invoke-TimedCommand -Phase 'configure' -Executable $CMakeExe -CommandArgs $configureArgs -WorkingDirectory $RepoRoot
+    $configureCommandArgs = @('/c', $runQnxBuildCmd, $CMakeExe) + $configureArgs
+    $configureExit = Invoke-TimedCommand -Phase 'configure' -Executable 'cmd.exe' -CommandArgs $configureCommandArgs -WorkingDirectory $RepoRoot
     if ($configureExit -ne 0) {
         exit $configureExit
     }
 
-    $buildExit = Invoke-TimedCommand -Phase 'build' -Executable $CMakeExe -CommandArgs $buildArgs -WorkingDirectory $RepoRoot
+    $buildCommandArgs = @('/c', $runQnxBuildCmd, $CMakeExe) + $buildArgs
+    $buildExit = Invoke-TimedCommand -Phase 'build' -Executable 'cmd.exe' -CommandArgs $buildCommandArgs -WorkingDirectory $RepoRoot
     exit $buildExit
 }
 catch {

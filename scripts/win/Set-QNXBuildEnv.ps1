@@ -1,6 +1,6 @@
 param(
     [string]$VsDevCmd = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat',
-    [string]$QnxEnvBat = 'C:\Users\kicoulter\qnx800\qnxsdp-env.bat',
+    [string]$QnxEnvBat = "$env:USERPROFILE\qnx800\qnxsdp-env.bat",
     [string]$NinjaPath = 'C:\ninja-win\ninja.exe'
 )
 
@@ -54,4 +54,3 @@ Write-Host "  QNX_HOST=$($env:QNX_HOST)"
 Write-Host "  QNX_TARGET=$($env:QNX_TARGET)"
 Write-Host "  CMAKE_MAKE_PROGRAM=$($env:CMAKE_MAKE_PROGRAM)"
 Write-Host "  PATH_ORIG set: $([bool]$env:PATH_ORIG)"
-

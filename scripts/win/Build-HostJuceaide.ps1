@@ -14,12 +14,11 @@ if (-not $BuildDir) {
     $BuildDir = Join-Path $RepoRoot "libs\JUCE\$defaultDirName"
 }
 
-. (Join-Path $PSScriptRoot 'Set-VSBuildEnv.ps1')
-
 if (-not (Test-Path -LiteralPath $CMakeExe)) {
     $CMakeExe = (Get-Command cmake.exe -ErrorAction Stop).Source
 }
 $juceaideSource = Join-Path $RepoRoot 'libs\JUCE'
+$hostEnvWrapper = Join-Path $RepoRoot 'libs\JUCE\tools\run_with_vcvars.bat'
 $pathFile = Join-Path $BuildDir 'juceaide-path.txt'
 $configureArgs = @(
     '-S', $juceaideSource,
@@ -45,13 +44,13 @@ if ($Generator -eq 'Ninja') {
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
 Write-Host "Configuring native juceaide in $BuildDir with $Generator"
-& $cmakeExe @configureArgs
+& $hostEnvWrapper $CMakeExe @configureArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
 Write-Host "Building native juceaide with $Generator"
-& $cmakeExe @buildArgs
+& $hostEnvWrapper $CMakeExe @buildArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

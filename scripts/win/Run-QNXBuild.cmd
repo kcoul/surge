@@ -1,16 +1,19 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-call "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b %errorlevel%
-set "PATH_ORIG=!PATH!"
+set "REPO_ROOT=%~dp0..\.."
+pushd "%REPO_ROOT%" || exit /b 1
 
-call "C:\Users\kicoulter\qnx800\qnxsdp-env.bat" || exit /b %errorlevel%
-set "MAKEFLAGS="
-set "CMAKE_MAKE_PROGRAM=C:\ninja-win\ninja.exe"
+if not defined CMAKE_MAKE_PROGRAM set "CMAKE_MAKE_PROGRAM=C:\ninja-win\ninja.exe"
 
 if "%~1"=="" (
   echo Usage: Run-QNXBuild.cmd ^<command^>
+  popd
   exit /b 1
 )
 
-cmd /c %*
+call "%REPO_ROOT%\libs\JUCE\tools\run_with_vcvars_and_qnx_env.bat" %*
+set "ERR=%ERRORLEVEL%"
+
+popd
+exit /b %ERR%

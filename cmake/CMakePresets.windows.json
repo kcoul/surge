@@ -1,0 +1,118 @@
+{
+  "version": 6,
+  "include": [
+    "CMakePresets.common.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "host-juceaide-ninja",
+      "displayName": "Host juceaide (Ninja)",
+      "inherits": [
+        "host-juceaide-common"
+      ],
+      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-clean",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "C:/ninja-win/ninja.exe"
+      }
+    },
+    {
+      "name": "host-juceaide-nmake",
+      "displayName": "Host juceaide (NMake Makefiles)",
+      "inherits": [
+        "host-juceaide-common"
+      ],
+      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-nmake",
+      "generator": "NMake Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "qnx-surge",
+      "displayName": "QNX Surge XT",
+      "inherits": [
+        "qnx-surge-common"
+      ],
+      "binaryDir": "${sourceDir}/build-qnx-surge-xt-nolua",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "environment": {
+        "QNX_BASE": "$env{USERPROFILE}/qnx800",
+        "QNX_HOST": "$env{USERPROFILE}/qnx800/host/win64/x86_64",
+        "QNX_TARGET": "$env{USERPROFILE}/qnx800/target/qnx",
+        "QNX_CONFIGURATION": "$env{USERPROFILE}/.qnx",
+        "QNX_CONFIGURATION_EXCLUSIVE": "$env{USERPROFILE}/.qnx",
+        "MAKEFLAGS": "",
+        "PATH": "$env{USERPROFILE}/qnx800/host/win64/x86_64/usr/bin;$env{USERPROFILE}/qnx800/jre/bin;$env{USERPROFILE}/qnx800/host/common/bin;$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "C:/ninja-win/ninja.exe",
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build-host-juceaide-clean/extras/Build/juceaide/juceaide_artefacts/Release/juceaide.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-host-juceaide-ninja",
+      "displayName": "Build host juceaide (Ninja)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "host-juceaide-ninja",
+      "targets": [
+        "juceaide"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "build-host-juceaide-nmake",
+      "displayName": "Build host juceaide (NMake Makefiles)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "host-juceaide-nmake",
+      "targets": [
+        "juceaide"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "build-qnx-surge",
+      "displayName": "Build QNX Surge XT",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "qnx-surge",
+      "targets": [
+        "surge-xt_Standalone"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "version": 6,
+  "include": [
+    "CMakePresets.common.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "host-juceaide-ninja-linux",
+      "displayName": "Host juceaide (Ninja, Linux)",
+      "inherits": [
+        "host-juceaide-common"
+      ],
+      "binaryDir": "${sourceDir}/libs/JUCE/build-host-juceaide-linux",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "qnx-surge-linux",
+      "displayName": "QNX Surge XT (Linux host)",
+      "inherits": [
+        "qnx-surge-common"
+      ],
+      "binaryDir": "${sourceDir}/build-qnx-surge-xt-nolua-linux",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "environment": {
+        "QNX_BASE": "$env{HOME}/qnx800",
+        "QNX_HOST": "$env{HOME}/qnx800/host/linux/x86_64",
+        "QNX_TARGET": "$env{HOME}/qnx800/target/qnx",
+        "QNX_CONFIGURATION": "$env{HOME}/.qnx",
+        "QNX_CONFIGURATION_EXCLUSIVE": "$env{HOME}/.qnx",
+        "MAKEFLAGS": "",
+        "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
+      },
+      "cacheVariables": {
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build-host-juceaide-linux/extras/Build/juceaide/juceaide_artefacts/juceaide"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-host-juceaide-ninja-linux",
+      "displayName": "Build host juceaide (Ninja, Linux)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "host-juceaide-ninja-linux",
+      "targets": [
+        "juceaide"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "build-qnx-surge-linux",
+      "displayName": "Build QNX Surge XT (Linux host)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "qnx-surge-linux",
+      "targets": [
+        "surge-xt_Standalone"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ]
+}

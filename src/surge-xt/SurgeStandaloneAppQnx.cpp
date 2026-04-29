@@ -5,12 +5,20 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_opengl/juce_opengl.h>
 #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#include <algorithm>
 #include <unistd.h>
 
 #if JucePlugin_Build_Standalone && JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP && defined(__QNXNTO__)
 
 namespace
 {
+constexpr const char* qnxOpenGLPresentationProperty = "juce_qnx_use_opengl_presentation";
+
+juce::String getQnxBuildStamp()
+{
+    return juce::String (__DATE__) + " " + juce::String (__TIME__);
+}
+
 juce::String getRequestedRendererMode()
 {
     auto mode = juce::SystemStats::getEnvironmentVariable ("SURGE_QNX_RENDERER", "opengl")
@@ -59,59 +67,288 @@ void applyDisplayBounds (juce::ResizableWindow& window)
         window.setBounds (displayArea);
     }
 }
+
 }
 
 namespace juce
 {
-class QnxStandaloneFilterWindow final : public StandaloneFilterWindow,
-                                        private OpenGLRenderer,
-                                        private Timer
+String describeDesktopComponent (Component& component)
+{
+    const auto name = component.getName().isNotEmpty() ? component.getName()
+                     : component.getTitle().isNotEmpty() ? component.getTitle()
+                     : String (typeid (component).name());
+
+    return name + " [" + String (typeid (component).name()) + "]";
+}
+
+String describePeerForLogging (Component& component)
+{
+    String description = describeDesktopComponent (component);
+
+    if (auto* peer = component.getPeer())
+    {
+        description += " peerFlags=" + String (peer->getStyleFlags());
+        description += " peerId=" + String ((int) peer->getUniqueID());
+    }
+    else
+    {
+        description += " peer=<null>";
+    }
+
+    description += " visible=" + String (component.isShowing() ? "yes" : "no");
+    description += " bounds=" + component.getBounds().toString();
+    description += " opaque=" + String (component.isOpaque() ? "yes" : "no");
+    return description;
+}
+
+bool shouldUseOpenGLForDesktopPeer (Component& component)
+{
+    if (! component.isOnDesktop())
+        return false;
+
+    if (static_cast<bool> (component.getProperties().getWithDefault (qnxOpenGLPresentationProperty, false)))
+        return true;
+
+    return false;
+}
+
+class QnxOpenGLPeerAttachment final : private OpenGLRenderer
+{
+public:
+    explicit QnxOpenGLPeerAttachment (Component& componentIn)
+        : component (&componentIn)
+    {
+        componentIn.getProperties().set (qnxOpenGLPresentationProperty, true);
+        Logger::writeToLog ("Tracking OpenGL attachment for " + describePeerForLogging (componentIn));
+    }
+
+    ~QnxOpenGLPeerAttachment() override
+    {
+        if (component != nullptr)
+            Logger::writeToLog ("Destroying OpenGL attachment tracker for " + describePeerForLogging (*component));
+        else
+            Logger::writeToLog ("Destroying OpenGL attachment tracker for stale component");
+
+        shutdown();
+    }
+
+    bool isFor (Component& candidate) const noexcept
+    {
+        return component.getComponent() == &candidate;
+    }
+
+    bool isStale() const noexcept
+    {
+        return component == nullptr || component->getPeer() == nullptr;
+    }
+
+    String describeCurrentState() const
+    {
+        if (component == nullptr)
+            return "<stale component>";
+
+        return describePeerForLogging (*component)
+             + " attachAttempted=" + String (attachAttempted ? "yes" : "no")
+             + " glActive=" + String (isOpenGLActive.load() ? "yes" : "no");
+    }
+
+    void update()
+    {
+        if (component == nullptr)
+        {
+            Logger::writeToLog ("OpenGL attachment update skipped for stale component");
+            shutdown();
+            return;
+        }
+
+        if (component->getPeer() == nullptr || ! component->isShowing()
+            || component->getWidth() <= 0 || component->getHeight() <= 0)
+        {
+            Logger::writeToLog ("OpenGL attachment waiting for ready peer: " + describeCurrentState());
+            return;
+        }
+
+        if (! attachAttempted)
+        {
+            attachAttempted = true;
+            attachStartMs = Time::getMillisecondCounterHiRes();
+            openGLContext.setRenderer (this);
+            openGLContext.setComponentPaintingEnabled (true);
+            openGLContext.setContinuousRepainting (true);
+            Logger::writeToLog ("Calling OpenGLContext::attachTo for " + describeCurrentState());
+            openGLContext.attachTo (*component);
+            Logger::writeToLog ("Requested OpenGL context attachment for "
+                                + describeCurrentState());
+            return;
+        }
+
+        if (! isOpenGLActive.load()
+            && Time::getMillisecondCounterHiRes() - attachStartMs > 1500.0)
+        {
+            Logger::writeToLog ("OpenGL context was not created within 1500ms for "
+                                + describeCurrentState()
+                                + "; falling back to software renderer");
+            component->getProperties().set (qnxOpenGLPresentationProperty, false);
+            requestVisualRefresh();
+            shutdown();
+        }
+    }
+
+    void shutdown()
+    {
+        if (component != nullptr)
+            Logger::writeToLog ("Shutting down OpenGL attachment for " + describeCurrentState());
+
+        openGLContext.detach();
+        openGLContext.setRenderer (nullptr);
+        isOpenGLActive = false;
+        attachAttempted = false;
+        attachStartMs = 0.0;
+    }
+
+private:
+    void newOpenGLContextCreated() override
+    {
+        isOpenGLActive = true;
+
+        if (component != nullptr)
+            Logger::writeToLog ("OpenGL context created for " + describeCurrentState());
+
+        requestVisualRefresh();
+    }
+
+    void renderOpenGL() override {}
+
+    void openGLContextClosing() override
+    {
+        isOpenGLActive = false;
+
+        if (component != nullptr)
+            Logger::writeToLog ("OpenGL context closing for " + describeCurrentState());
+    }
+
+    void requestVisualRefresh()
+    {
+        if (component == nullptr)
+            return;
+
+        component->repaint();
+
+        if (auto* peer = component->getPeer())
+        {
+            Logger::writeToLog ("Requesting immediate repaint flush for " + describeCurrentState());
+            peer->performAnyPendingRepaintsNow();
+        }
+    }
+
+    Component::SafePointer<Component> component;
+    OpenGLContext openGLContext;
+    std::atomic<bool> isOpenGLActive { false };
+    bool attachAttempted = false;
+    double attachStartMs = 0.0;
+};
+
+class QnxOpenGLPeerManager final : private Timer
+{
+public:
+    explicit QnxOpenGLPeerManager (bool enabledIn)
+        : enabled (enabledIn)
+    {
+        if (enabled)
+            startTimerHz (30);
+    }
+
+    ~QnxOpenGLPeerManager() override
+    {
+        stopTimer();
+        attachments.clear();
+    }
+
+private:
+    void timerCallback() override
+    {
+        if (! enabled)
+            return;
+
+        for (int i = 0; i < ComponentPeer::getNumPeers(); ++i)
+            if (auto* peer = ComponentPeer::getPeer (i))
+                classifyPeer (peer->getComponent());
+
+        attachments.erase (std::remove_if (attachments.begin(),
+                                           attachments.end(),
+                                           [] (const auto& attachment)
+                                           {
+                                               if (! attachment->isStale())
+                                                   return false;
+
+                                               Logger::writeToLog ("Removing stale OpenGL attachment tracker");
+                                               return true;
+                                           }),
+                           attachments.end());
+
+        for (auto& attachment : attachments)
+            attachment->update();
+    }
+
+    void classifyPeer (Component& component)
+    {
+        if (! component.isOnDesktop())
+            return;
+
+        const auto wantsOpenGL = shouldUseOpenGLForDesktopPeer (component);
+        component.getProperties().set (qnxOpenGLPresentationProperty, wantsOpenGL);
+
+        const auto alreadyAttached = std::any_of (attachments.begin(),
+                                                  attachments.end(),
+                                                  [&component] (const auto& attachment)
+                                                  {
+                                                      return attachment->isFor (component);
+                                                  });
+
+        if (! wantsOpenGL)
+            return;
+
+        if (! alreadyAttached)
+        {
+            Logger::writeToLog ("Creating OpenGL attachment tracker for " + describePeerForLogging (component));
+            attachments.push_back (std::make_unique<QnxOpenGLPeerAttachment> (component));
+        }
+    }
+
+    bool enabled = false;
+    std::vector<std::unique_ptr<QnxOpenGLPeerAttachment>> attachments;
+};
+
+class QnxStandaloneFilterWindow final : public StandaloneFilterWindow
 {
 public:
     QnxStandaloneFilterWindow (const String& title,
                                Colour backgroundColour,
-                               std::unique_ptr<StandalonePluginHolder> pluginHolderIn,
-                               bool shouldEnableOpenGLIn)
-        : StandaloneFilterWindow (title, backgroundColour, std::move (pluginHolderIn)),
-          shouldEnableOpenGL (shouldEnableOpenGLIn)
+                               std::unique_ptr<StandalonePluginHolder> pluginHolderIn)
+        : StandaloneFilterWindow (title, backgroundColour, std::move (pluginHolderIn))
     {
+        getProperties().set (qnxOpenGLPresentationProperty, true);
+        setUsingNativeTitleBar (false);
+        setTitleBarButtonsRequired (DocumentWindow::closeButton, false);
         updateDisplayLayout();
-
-        if (shouldEnableOpenGL)
-        {
-            startTimerHz (30);
-            tryAttachOpenGLIfReady();
-        }
-        else
-        {
-            Logger::writeToLog ("OpenGL renderer disabled for Surge standalone");
-        }
-    }
-
-    ~QnxStandaloneFilterWindow() override
-    {
-        shutdownOpenGL();
     }
 
     void resized() override
     {
         StandaloneFilterWindow::resized();
         updateDisplayLayout();
-        tryAttachOpenGLIfReady();
     }
 
     void visibilityChanged() override
     {
         StandaloneFilterWindow::visibilityChanged();
         updateDisplayLayout();
-        tryAttachOpenGLIfReady();
     }
 
     void parentHierarchyChanged() override
     {
         StandaloneFilterWindow::parentHierarchyChanged();
         updateDisplayLayout();
-        tryAttachOpenGLIfReady();
     }
 
 private:
@@ -130,85 +367,6 @@ private:
 
         applyDisplayBounds (*this);
     }
-
-    void newOpenGLContextCreated() override
-    {
-        isOpenGLActive = true;
-        Logger::writeToLog ("OpenGL context created for Surge standalone");
-        requestVisualRefresh();
-    }
-
-    void renderOpenGL() override {}
-
-    void openGLContextClosing() override
-    {
-        isOpenGLActive = false;
-        Logger::writeToLog ("OpenGL context closing for Surge standalone");
-    }
-
-    void timerCallback() override
-    {
-        if (isOpenGLActive.load())
-        {
-            requestVisualRefresh();
-            return;
-        }
-
-        tryAttachOpenGLIfReady();
-
-        if (openGLAttachAttempted && ! isOpenGLActive.load())
-        {
-            const auto elapsedMs = Time::getMillisecondCounterHiRes() - openGLAttachStartMs;
-
-            if (elapsedMs > 1500.0)
-            {
-                Logger::writeToLog ("OpenGL context was not created within 1500ms; falling back to software renderer");
-                shutdownOpenGL();
-                requestVisualRefresh();
-                stopTimer();
-            }
-        }
-    }
-
-    void tryAttachOpenGLIfReady()
-    {
-        if (! shouldEnableOpenGL || openGLAttachAttempted || isOpenGLActive.load())
-            return;
-
-        if (getPeer() == nullptr || ! isShowing() || getWidth() <= 0 || getHeight() <= 0)
-            return;
-
-        openGLAttachAttempted = true;
-        openGLAttachStartMs = Time::getMillisecondCounterHiRes();
-        openGLContext.setRenderer (this);
-        openGLContext.setComponentPaintingEnabled (true);
-        openGLContext.setContinuousRepainting (true);
-        openGLContext.attachTo (*this);
-        Logger::writeToLog ("Requested OpenGL context attachment for Surge standalone");
-    }
-
-    void shutdownOpenGL()
-    {
-        openGLContext.detach();
-        openGLContext.setRenderer (nullptr);
-        isOpenGLActive = false;
-        openGLAttachAttempted = false;
-        shouldEnableOpenGL = false;
-    }
-
-    void requestVisualRefresh()
-    {
-        if (auto* content = getContentComponent())
-            content->repaint();
-
-        repaint();
-    }
-
-    OpenGLContext openGLContext;
-    std::atomic<bool> isOpenGLActive { false };
-    bool shouldEnableOpenGL = false;
-    bool openGLAttachAttempted = false;
-    double openGLAttachStartMs = 0.0;
     bool isUpdatingDisplayLayout = false;
 };
 
@@ -253,6 +411,7 @@ public:
     {
         const auto& displays = Desktop::getInstance().getDisplays().displays;
         const auto rendererMode = getRequestedRendererMode();
+        Logger::writeToLog ("QNX build stamp: " + getQnxBuildStamp());
         Logger::writeToLog ("Display count: " + String (displays.size()));
 
         if (displays.isEmpty())
@@ -275,8 +434,7 @@ public:
 
         auto* window = new QnxStandaloneFilterWindow (getApplicationName(),
                                                       LookAndFeel::getDefaultLookAndFeel().findColour (ResizableWindow::backgroundColourId),
-                                                      createPluginHolder(),
-                                                      rendererMode == "opengl");
+                                                      createPluginHolder());
 
         Logger::writeToLog ("QNX standalone window created in fullscreen-display mode");
 
@@ -296,6 +454,11 @@ public:
         Logger::writeToLog ("Application initialise()");
         Logger::writeToLog ("Process PID: " + String ((int) getpid()));
         Logger::writeToLog ("Requested renderer mode: " + rendererMode);
+        Logger::writeToLog (rendererMode == "opengl"
+                                ? "Using OpenGL for all QNX desktop peers"
+                                : "Using software rendering for all QNX desktop peers");
+
+        openGLPeerManager = std::make_unique<QnxOpenGLPeerManager> (rendererMode == "opengl");
 
         mainWindow.reset (createWindow());
 
@@ -316,6 +479,7 @@ public:
     void shutdown() override
     {
         Logger::writeToLog ("Application shutdown()");
+        openGLPeerManager = nullptr;
         pluginHolder = nullptr;
         mainWindow = nullptr;
         appProperties.saveIfNeeded();
@@ -352,6 +516,7 @@ private:
     std::unique_ptr<FileLogger> logger;
     std::unique_ptr<StandaloneFilterWindow> mainWindow;
     std::unique_ptr<StandalonePluginHolder> pluginHolder;
+    std::unique_ptr<QnxOpenGLPeerManager> openGLPeerManager;
 };
 }
 

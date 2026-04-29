@@ -214,6 +214,7 @@ int main() {}" IS_X86)
       -Wno-return-local-addr # squelch sqlite3 error: function may return address of local variable
       -Wno-error=restrict # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105651
       -Wno-date-time
+      -Wno-error=deprecated-declarations
     )
   endif()
 endif()

@@ -30,12 +30,6 @@ if(SURGE_HOST_JUCEAIDE_ONLY)
   return()
 endif()
 
-if(SURGE_HOST_MIDI_OSC_BRIDGE_ONLY)
-  message(STATUS "Host-only MIDI to OSC bridge configure")
-  add_subdirectory(extras/SurgeMidiToOscBridge)
-  return()
-endif()
-
 # Banner {{{
 message(STATUS "It's Surge XT, folks! Version is ${PROJECT_VERSION}.")
 message(STATUS "CMAKE_BUILD_TYPE is ${CMAKE_BUILD_TYPE}.")
@@ -322,5 +316,8 @@ add_custom_command(TARGET code-quality-pipeline-checks
   COMMAND ${CMAKE_COMMAND} -E echo About to check clang-format using clang-format-12
   COMMAND git ls-files -- ${CLANG_FORMAT_GLOBS} | xargs clang-format-12 --dry-run --Werror
 )
+
+message(STATUS "Adding MIDI to OSC bridge")
+add_subdirectory(extras/SurgeMidiToOscBridge)
 
 # }}}

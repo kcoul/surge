@@ -55,7 +55,24 @@
         "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
       },
       "cacheVariables": {
-        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/JUCE-host/extras/Build/juceaide/juceaide_artefacts/juceaide"
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/JUCE-host/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+      }
+    },
+    {
+      "name": "linux-aarch64-ubuntu-surge",
+      "displayName": "aarch64 Ubuntu Surge XT (Linux host)",
+      "inherits": [
+        "linux-aarch64-ubuntu-surge-common"
+      ],
+      "binaryDir": "${sourceDir}/build-linux-aarch64-ubuntu",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/JUCE-host/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
       }
     }
   ],
@@ -114,6 +131,23 @@
         "MAKEFLAGS": "",
         "PATH": "$env{HOME}/qnx800/host/linux/x86_64/usr/bin:$env{HOME}/qnx800/jre/bin:$env{HOME}/qnx800/host/common/bin:$penv{PATH}"
       },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "build-linux-aarch64-ubuntu-surge",
+      "displayName": "Build aarch64 Ubuntu Surge XT (Linux host)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "linux-aarch64-ubuntu-surge",
+      "targets": [
+        "surge-xt_Standalone"
+      ],
+      "jobs": 4,
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",

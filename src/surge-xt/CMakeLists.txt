@@ -93,6 +93,11 @@ if (SURGE_EXPOSE_PRESETS)
   target_compile_definitions(${PROJECT_NAME} PUBLIC SURGE_EXPOSE_PRESETS=1)
 endif()
 
+if(SURGE_STANDALONE_AUTO_OSC_IN)
+  message(STATUS "Standalone Surge XT will auto-enable OSC input")
+  target_compile_definitions(${PROJECT_NAME} PUBLIC SURGE_STANDALONE_AUTO_OSC_IN=1)
+endif()
+
 target_sources(${PROJECT_NAME} PRIVATE
   SurgeSynthEditor.cpp
   SurgeSynthEditor.h

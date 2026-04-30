@@ -2,6 +2,8 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
 
+#include <array>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -13,6 +15,57 @@ constexpr auto defaultTargetAddress = "127.0.0.1";
 juce::String getNoteName (int noteNumber)
 {
     return juce::MidiMessage::getMidiNoteName (noteNumber, true, true, 4);
+}
+
+enum class ControllerMode
+{
+    absolute,
+    relative
+};
+
+struct ControllerMapping
+{
+    int controllerNumber;
+    const char* label;
+    const char* oscAddress;
+    ControllerMode mode;
+    float currentValue;
+};
+
+constexpr std::array<ControllerMapping, 16> defaultControllerMappings {{
+    { 12, "Fader 1 - Osc 1 Volume",       "/param/a/mixer/osc1/volume",    ControllerMode::absolute, 0.0f },
+    { 13, "Fader 2 - Osc 2 Volume",       "/param/a/mixer/osc2/volume",    ControllerMode::absolute, 0.0f },
+    { 14, "Fader 3 - Osc 3 Volume",       "/param/a/mixer/osc3/volume",    ControllerMode::absolute, 0.0f },
+    { 15, "Fader 4 - Noise Volume",       "/param/a/mixer/noise/volume",   ControllerMode::absolute, 0.0f },
+    { 16, "Fader 5 - Filter 1 Cutoff",    "/param/a/filter/1/cutoff",      ControllerMode::absolute, 0.0f },
+    { 17, "Fader 6 - Filter 1 Resonance", "/param/a/filter/1/resonance",   ControllerMode::absolute, 0.0f },
+    { 18, "Fader 7 - Filter 2 Cutoff",    "/param/a/filter/2/cutoff",      ControllerMode::absolute, 0.0f },
+    { 19, "Fader 8 - Filter 2 Resonance", "/param/a/filter/2/resonance",   ControllerMode::absolute, 0.0f },
+    { 22, "Encoder 1 - Filter Balance",   "/param/a/filter/balance",       ControllerMode::relative, 0.5f },
+    { 23, "Encoder 2 - Filter Feedback",  "/param/a/filter/feedback",      ControllerMode::relative, 0.0f },
+    { 24, "Encoder 3 - Waveshaper Drive", "/param/a/waveshaper/drive",     ControllerMode::relative, 0.0f },
+    { 25, "Encoder 4 - Amp Attack",       "/param/a/aeg/attack",           ControllerMode::relative, 0.0f },
+    { 26, "Encoder 5 - Amp Decay",        "/param/a/aeg/decay",            ControllerMode::relative, 0.5f },
+    { 27, "Encoder 6 - Amp Sustain",      "/param/a/aeg/sustain",          ControllerMode::relative, 1.0f },
+    { 28, "Encoder 7 - Amp Release",      "/param/a/aeg/release",          ControllerMode::relative, 0.25f },
+    { 29, "Encoder 8 - Portamento",       "/param/a/portamento",           ControllerMode::relative, 0.0f },
+}};
+
+juce::String controllerModeName (ControllerMode mode)
+{
+    return mode == ControllerMode::absolute ? "absolute" : "relative";
+}
+
+std::optional<int> relativeControllerDelta (int value)
+{
+    // Common two's-complement relative CC encoding: 1..63 increment, 65..127 decrement.
+    if (value >= 1 && value <= 63)
+        return value;
+
+    if (value >= 65 && value <= 127)
+        return value - 128;
+
+    return std::nullopt;
 }
 }
 
@@ -57,7 +110,7 @@ public:
         allNotesOffButton.onClick = [this] { sendAllNotesOff(); };
         addAndMakeVisible (allNotesOffButton);
 
-        schemaLabel.setText ("Forwarded OSC: /mnote <note:float> <velocity:float>  (note-off = velocity 0)",
+        schemaLabel.setText ("Forwarded OSC: /mnote plus CC12-19/22-29 mapped to /param/a/... float values",
                              juce::dontSendNotification);
         addAndMakeVisible (schemaLabel);
 
@@ -74,6 +127,18 @@ public:
         midiInputsBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
         midiInputsBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
         addAndMakeVisible (midiInputsBox);
+
+        controllerMappingsLabel.setText ("Controller mappings", juce::dontSendNotification);
+        addAndMakeVisible (controllerMappingsLabel);
+
+        controllerMappingsBox.setMultiLine (true);
+        controllerMappingsBox.setReadOnly (true);
+        controllerMappingsBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        controllerMappingsBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        controllerMappingsBox.setColour (juce::TextEditor::outlineColourId,
+                                         juce::Colour::fromRGB (88, 102, 114));
+        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
+        addAndMakeVisible (controllerMappingsBox);
 
         logLabel.setText ("Event log", juce::dontSendNotification);
         addAndMakeVisible (logLabel);
@@ -140,7 +205,10 @@ public:
         area.removeFromTop (12);
 
         midiInputsLabel.setBounds (area.removeFromTop (24));
-        midiInputsBox.setBounds (area.removeFromTop (110));
+        midiInputsBox.setBounds (area.removeFromTop (88));
+        area.removeFromTop (12);
+        controllerMappingsLabel.setBounds (area.removeFromTop (24));
+        controllerMappingsBox.setBounds (area.removeFromTop (154));
         area.removeFromTop (14);
         logLabel.setBounds (area.removeFromTop (24));
         area.removeFromTop (6);
@@ -222,14 +290,19 @@ private:
 
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override
     {
-        if (! (message.isNoteOn() || message.isNoteOff()))
+        if (! (message.isNoteOn() || message.isNoteOff() || message.isController()))
             return;
 
-        const auto noteNumber = message.getNoteNumber();
         const auto deviceName = source != nullptr ? source->getName() : juce::String ("<unknown>");
 
-        if (message.isNoteOn())
+        if (message.isController())
         {
+            handleControllerMessage (deviceName, message.getControllerNumber(),
+                                     message.getControllerValue());
+        }
+        else if (message.isNoteOn())
+        {
+            const auto noteNumber = message.getNoteNumber();
             const auto velocity = message.getVelocity();
             sendSurgeNoteMessage (noteNumber, velocity);
             {
@@ -243,6 +316,7 @@ private:
         }
         else
         {
+            const auto noteNumber = message.getNoteNumber();
             sendSurgeNoteMessage (noteNumber, 0);
             {
                 const juce::ScopedLock lock (activeNotesLock);
@@ -254,9 +328,58 @@ private:
         }
     }
 
+    void handleControllerMessage (const juce::String& deviceName, int controllerNumber, int controllerValue)
+    {
+        ControllerMapping mappingToSend {};
+        float oscValue = 0.0f;
+
+        {
+            const juce::ScopedLock lock (controllerMappingsLock);
+
+            auto* mapping = findControllerMapping (controllerNumber);
+            if (mapping == nullptr)
+                return;
+
+            oscValue = controllerValue / 127.0f;
+
+            if (mapping->mode == ControllerMode::relative)
+            {
+                auto delta = relativeControllerDelta (controllerValue);
+                if (! delta.has_value())
+                    return;
+
+                oscValue = juce::jlimit (0.0f, 1.0f, mapping->currentValue + (*delta / 127.0f));
+            }
+
+            mapping->currentValue = oscValue;
+            mappingToSend = *mapping;
+        }
+
+        sendSurgeParameterMessage (mappingToSend, oscValue);
+
+        appendLogAsync ("MIDI CC" + juce::String (controllerNumber)
+                        + " from " + deviceName
+                        + " -> " + juce::String (mappingToSend.oscAddress)
+                        + " value=" + juce::String (oscValue, 3));
+    }
+
+    ControllerMapping* findControllerMapping (int controllerNumber)
+    {
+        for (auto& mapping : controllerMappings)
+            if (mapping.controllerNumber == controllerNumber)
+                return &mapping;
+
+        return nullptr;
+    }
+
     void sendSurgeNoteMessage (int noteNumber, int velocity)
     {
         sendOscMessage (juce::OSCMessage ("/mnote", (float) noteNumber, (float) velocity));
+    }
+
+    void sendSurgeParameterMessage (const ControllerMapping& mapping, float normalizedValue)
+    {
+        sendOscMessage (juce::OSCMessage (mapping.oscAddress, normalizedValue));
     }
 
     void sendAllNotesOff()
@@ -299,6 +422,20 @@ private:
         settingsFile.saveIfNeeded();
     }
 
+    juce::String getControllerMappingsDescription() const
+    {
+        juce::StringArray lines;
+
+        for (const auto& mapping : controllerMappings)
+        {
+            lines.add ("CC" + juce::String (mapping.controllerNumber)
+                       + " (" + controllerModeName (mapping.mode) + ")  "
+                       + mapping.label + "  ->  " + mapping.oscAddress);
+        }
+
+        return lines.joinIntoString ("\n");
+    }
+
     void appendLog (const juce::String& line)
     {
         const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
@@ -326,17 +463,21 @@ private:
     juce::Label statusLabel;
     juce::Label midiInputsLabel;
     juce::TextEditor midiInputsBox;
+    juce::Label controllerMappingsLabel;
+    juce::TextEditor controllerMappingsBox;
     juce::Label logLabel;
     juce::TextEditor logBox;
     juce::PropertiesFile& settingsFile;
 
     juce::CriticalSection oscLock;
     juce::CriticalSection activeNotesLock;
+    juce::CriticalSection controllerMappingsLock;
     juce::OSCSender oscSender;
     juce::String targetHost = defaultTargetAddress;
     int targetPort = defaultOscPort;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     std::set<int> activeNotes;
+    std::array<ControllerMapping, 16> controllerMappings = defaultControllerMappings;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

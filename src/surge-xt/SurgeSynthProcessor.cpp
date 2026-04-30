@@ -191,7 +191,7 @@ SurgeSynthProcessor::SurgeSynthProcessor()
     midiKeyboardState.addListener(this);
     oscHandler.initOSC(this, surge);
 
-#if defined(__QNXNTO__)
+#if defined(SURGE_STANDALONE_AUTO_OSC_IN)
     if (wrapperType == juce::AudioProcessor::wrapperType_Standalone
         && ! surge->storage.oscReceiving
         && ! surge->storage.oscStartIn)

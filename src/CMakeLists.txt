@@ -9,6 +9,12 @@ option(SURGE_COPY_AFTER_BUILD "Copy JUCE plugins to system plugin area after bui
 option(SURGE_EXPOSE_PRESETS "Expose surge presets via the JUCE Program API" OFF)
 option(SURGE_INCLUDE_MELATONIN_INSPECTOR "Include melatonin inspector" OFF)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+  option(SURGE_STANDALONE_AUTO_OSC_IN "Automatically enable OSC input for standalone builds" ON)
+else()
+  option(SURGE_STANDALONE_AUTO_OSC_IN "Automatically enable OSC input for standalone builds" OFF)
+endif()
+
 # Currently the JUCE LV2 build crashes in our CI pipeline, so leave it for users to self build
 option(SURGE_BUILD_LV2 "Build Surge as an LV2" OFF)
 

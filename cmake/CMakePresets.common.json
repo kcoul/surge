@@ -44,6 +44,25 @@
         "SURGE_BUILD_CLAP": "OFF",
         "SURGE_BUILD_LV2": "OFF",
         "SURGE_SKIP_LUA": "TRUE",
+        "SURGE_STANDALONE_AUTO_OSC_IN": "ON",
+        "SST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM": "ON"
+      }
+    },
+    {
+      "name": "linux-aarch64-ubuntu-surge-common",
+      "hidden": true,
+      "inherits": [
+        "common"
+      ],
+      "toolchainFile": "${sourceDir}/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake",
+      "cacheVariables": {
+        "SURGE_BUILD_FX": "OFF",
+        "SURGE_BUILD_TESTRUNNER": "OFF",
+        "SURGE_BUILD_CLAP": "OFF",
+        "SURGE_BUILD_LV2": "OFF",
+        "SURGE_SKIP_LUA": "TRUE",
+        "SURGE_SKIP_VST3": "ON",
+        "SURGE_STANDALONE_AUTO_OSC_IN": "ON",
         "SST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM": "ON"
       }
     }

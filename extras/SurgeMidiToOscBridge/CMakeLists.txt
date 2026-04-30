@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(NOT COMMAND juce_add_gui_app)
+    set(SURGE_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/JUCE" CACHE STRING "Path to JUCE library source tree")
+    add_subdirectory(${SURGE_JUCE_PATH} ${CMAKE_BINARY_DIR}/JUCE EXCLUDE_FROM_ALL)
+endif()
+
 juce_add_gui_app(SurgeMidiToOscBridge
     PRODUCT_NAME "Surge MIDI To OSC Bridge"
     BUNDLE_ID org.surge-synth-team.SurgeMidiToOscBridge)

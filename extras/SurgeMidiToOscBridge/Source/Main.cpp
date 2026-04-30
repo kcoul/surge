@@ -10,6 +10,7 @@
 namespace
 {
 constexpr int defaultOscPort = 53280;
+constexpr int defaultEncoderStep = 8;
 constexpr auto defaultTargetAddress = "127.0.0.1";
 
 juce::String getNoteName (int noteNumber)
@@ -21,6 +22,14 @@ enum class ControllerMode
 {
     absolute,
     relative
+};
+
+enum class EncoderMode
+{
+    absolute = 1,
+    twosComplement = 2,
+    endpoint127Up = 3,
+    endpoint0Up = 4
 };
 
 struct ControllerMapping
@@ -56,14 +65,74 @@ juce::String controllerModeName (ControllerMode mode)
     return mode == ControllerMode::absolute ? "absolute" : "relative";
 }
 
-std::optional<int> relativeControllerDelta (int value)
+juce::String encoderModeName (EncoderMode mode)
 {
-    // Common two's-complement relative CC encoding: 1..63 increment, 65..127 decrement.
-    if (value >= 1 && value <= 63)
-        return value;
+    switch (mode)
+    {
+    case EncoderMode::absolute:
+        return "Absolute 0-127";
+    case EncoderMode::twosComplement:
+        return "Two's complement";
+    case EncoderMode::endpoint127Up:
+        return "Endpoint 0/127 (127 up)";
+    case EncoderMode::endpoint0Up:
+        return "Endpoint 0/127 (0 up)";
+    }
 
-    if (value >= 65 && value <= 127)
-        return value - 128;
+    return "Unknown";
+}
+
+EncoderMode encoderModeFromId (int id)
+{
+    switch (id)
+    {
+    case static_cast<int> (EncoderMode::absolute):
+        return EncoderMode::absolute;
+    case static_cast<int> (EncoderMode::twosComplement):
+        return EncoderMode::twosComplement;
+    case static_cast<int> (EncoderMode::endpoint0Up):
+        return EncoderMode::endpoint0Up;
+    case static_cast<int> (EncoderMode::endpoint127Up):
+    default:
+        return EncoderMode::endpoint127Up;
+    }
+}
+
+std::optional<int> relativeControllerDelta (int value, EncoderMode encoderMode)
+{
+    switch (encoderMode)
+    {
+    case EncoderMode::absolute:
+        return std::nullopt;
+
+    case EncoderMode::twosComplement:
+        // Common two's-complement relative CC encoding: 1..63 increment, 65..127 decrement.
+        if (value >= 1 && value <= 63)
+            return value;
+
+        if (value >= 65 && value <= 127)
+            return value - 128;
+
+        return std::nullopt;
+
+    case EncoderMode::endpoint127Up:
+        if (value == 127)
+            return 1;
+
+        if (value == 0)
+            return -1;
+
+        return std::nullopt;
+
+    case EncoderMode::endpoint0Up:
+        if (value == 0)
+            return 1;
+
+        if (value == 127)
+            return -1;
+
+        return std::nullopt;
+    }
 
     return std::nullopt;
 }
@@ -109,6 +178,36 @@ public:
         allNotesOffButton.setButtonText ("All Notes Off");
         allNotesOffButton.onClick = [this] { sendAllNotesOff(); };
         addAndMakeVisible (allNotesOffButton);
+
+        encoderModeLabel.setText ("Encoder Mode", juce::dontSendNotification);
+        addAndMakeVisible (encoderModeLabel);
+
+        encoderModeBox.addItem (encoderModeName (EncoderMode::endpoint127Up),
+                                static_cast<int> (EncoderMode::endpoint127Up));
+        encoderModeBox.addItem (encoderModeName (EncoderMode::endpoint0Up),
+                                static_cast<int> (EncoderMode::endpoint0Up));
+        encoderModeBox.addItem (encoderModeName (EncoderMode::twosComplement),
+                                static_cast<int> (EncoderMode::twosComplement));
+        encoderModeBox.addItem (encoderModeName (EncoderMode::absolute),
+                                static_cast<int> (EncoderMode::absolute));
+
+        encoderMode = encoderModeFromId (settingsFile.getIntValue ("encoderMode",
+                                                                   static_cast<int> (encoderMode)));
+        encoderModeBox.setSelectedId (static_cast<int> (encoderMode), juce::dontSendNotification);
+        encoderModeBox.onChange = [this] { updateEncoderModeFromComboBox(); };
+        addAndMakeVisible (encoderModeBox);
+
+        encoderStepLabel.setText ("Encoder Step", juce::dontSendNotification);
+        addAndMakeVisible (encoderStepLabel);
+
+        for (auto step : { 1, 2, 4, 8, 16, 32 })
+            encoderStepBox.addItem (juce::String (step), step);
+
+        encoderStep = juce::jlimit (1, 32,
+                                    settingsFile.getIntValue ("encoderStep", defaultEncoderStep));
+        encoderStepBox.setSelectedId (encoderStep, juce::dontSendNotification);
+        encoderStepBox.onChange = [this] { updateEncoderStepFromComboBox(); };
+        addAndMakeVisible (encoderStepBox);
 
         schemaLabel.setText ("Forwarded OSC: /mnote plus CC12-19/22-29 mapped to /param/a/... float values",
                              juce::dontSendNotification);
@@ -199,6 +298,14 @@ public:
         allNotesOffButton.setBounds (topRow.removeFromLeft (120));
 
         area.removeFromTop (10);
+        auto encoderRow = area.removeFromTop (30);
+        encoderModeLabel.setBounds (encoderRow.removeFromLeft (100));
+        encoderModeBox.setBounds (encoderRow.removeFromLeft (260));
+        encoderRow.removeFromLeft (18);
+        encoderStepLabel.setBounds (encoderRow.removeFromLeft (100));
+        encoderStepBox.setBounds (encoderRow.removeFromLeft (100));
+
+        area.removeFromTop (8);
         schemaLabel.setBounds (area.removeFromTop (24));
         area.removeFromTop (6);
         statusLabel.setBounds (area.removeFromTop (24));
@@ -344,11 +451,20 @@ private:
 
             if (mapping->mode == ControllerMode::relative)
             {
-                auto delta = relativeControllerDelta (controllerValue);
-                if (! delta.has_value())
-                    return;
+                if (encoderMode == EncoderMode::absolute)
+                {
+                    oscValue = controllerValue / 127.0f;
+                }
+                else
+                {
+                    auto delta = relativeControllerDelta (controllerValue, encoderMode);
+                    if (! delta.has_value())
+                        return;
 
-                oscValue = juce::jlimit (0.0f, 1.0f, mapping->currentValue + (*delta / 127.0f));
+                    oscValue = juce::jlimit (0.0f, 1.0f,
+                                             mapping->currentValue
+                                                 + ((*delta * encoderStep) / 127.0f));
+                }
             }
 
             mapping->currentValue = oscValue;
@@ -360,6 +476,8 @@ private:
         appendLogAsync ("MIDI CC" + juce::String (controllerNumber)
                         + " from " + deviceName
                         + " -> " + juce::String (mappingToSend.oscAddress)
+                        + " raw=" + juce::String (controllerValue)
+                        + " step=" + juce::String (encoderStep)
                         + " value=" + juce::String (oscValue, 3));
     }
 
@@ -419,12 +537,41 @@ private:
     {
         settingsFile.setValue ("targetIp", targetIpEditor.getText().trim());
         settingsFile.setValue ("targetPort", targetPortEditor.getText().trim());
+        settingsFile.setValue ("encoderMode", static_cast<int> (encoderMode));
+        settingsFile.setValue ("encoderStep", encoderStep);
         settingsFile.saveIfNeeded();
+    }
+
+    void updateEncoderModeFromComboBox()
+    {
+        {
+            const juce::ScopedLock lock (controllerMappingsLock);
+            encoderMode = encoderModeFromId (encoderModeBox.getSelectedId());
+        }
+
+        saveSettings();
+        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
+        appendLog ("Encoder mode set to " + encoderModeName (encoderMode));
+    }
+
+    void updateEncoderStepFromComboBox()
+    {
+        {
+            const juce::ScopedLock lock (controllerMappingsLock);
+            encoderStep = juce::jlimit (1, 32, encoderStepBox.getSelectedId());
+        }
+
+        saveSettings();
+        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
+        appendLog ("Encoder step set to " + juce::String (encoderStep));
     }
 
     juce::String getControllerMappingsDescription() const
     {
         juce::StringArray lines;
+        lines.add ("Encoder mode: " + encoderModeName (encoderMode));
+        lines.add ("Encoder step: " + juce::String (encoderStep) + " MIDI counts per tick");
+        lines.add ("");
 
         for (const auto& mapping : controllerMappings)
         {
@@ -459,6 +606,10 @@ private:
     juce::TextButton connectButton;
     juce::TextButton refreshMidiButton;
     juce::TextButton allNotesOffButton;
+    juce::Label encoderModeLabel;
+    juce::ComboBox encoderModeBox;
+    juce::Label encoderStepLabel;
+    juce::ComboBox encoderStepBox;
     juce::Label schemaLabel;
     juce::Label statusLabel;
     juce::Label midiInputsLabel;
@@ -475,6 +626,8 @@ private:
     juce::OSCSender oscSender;
     juce::String targetHost = defaultTargetAddress;
     int targetPort = defaultOscPort;
+    EncoderMode encoderMode = EncoderMode::absolute;
+    int encoderStep = defaultEncoderStep;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     std::set<int> activeNotes;
     std::array<ControllerMapping, 16> controllerMappings = defaultControllerMappings;

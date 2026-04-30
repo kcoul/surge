@@ -2137,7 +2137,7 @@ struct MSEGCanvas : public juce::Component, public Surge::GUI::SkinConsumingComp
 
             if (ms->vSnap > 0)
             {
-                v = limit_range(round(v / ms->vSnap) * ms->vSnap, -1.f, 1.f);
+                v = limit_range((float)(round(v / ms->vSnap) * ms->vSnap), -1.f, 1.f);
             }
 
             int seg = Surge::MSEG::timeToSegment(this->ms, t);

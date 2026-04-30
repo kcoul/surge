@@ -554,7 +554,7 @@ void LFOAndStepDisplay::paintWaveform(juce::Graphics &g)
         }
     }
 
-    float totalEnvTime = lfoEnvelopeDAHDTime + std::min(pow(2.0f, lfodata->release.val.f), 4.f) +
+    float totalEnvTime = lfoEnvelopeDAHDTime + std::min((float)pow(2.0f, lfodata->release.val.f), 4.f) +
                          0.5; // susTime; this is now 0.5 to keep the envelope fixed in gate mode
 
     float rateInHz = pow(2.0, (double)lfodata->rate.val.f);
@@ -1294,7 +1294,7 @@ void LFOAndStepDisplay::paintStepSeq(juce::Graphics &g)
          * So 2^rate = temposyncratioinb 2^-3.5;
          * rate = log2( 2^-3.5 * tsratioinb )
          */
-        floorrate = std::max(floorrate, log2(twotofloor * storage->temposyncratio_inv));
+        floorrate = std::max(floorrate, (float)log2(twotofloor * storage->temposyncratio_inv));
     }
 
     if (lfodata->rate.val.f < floorrate)

@@ -110,4 +110,4 @@ Testing/
 installer-tmp/
 .junie/
 
-/build-*/*
+**/build-*/*

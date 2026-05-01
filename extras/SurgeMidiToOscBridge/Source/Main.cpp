@@ -78,6 +78,13 @@ struct VoiceCommandAction
     const char* oscAddress;
 };
 
+enum class VoiceTranscriptionBackend
+{
+    whisperCpu = 1,
+    whisperGpu = 2,
+    hailoNpu = 3
+};
+
 constexpr std::array<ControllerMapping, 16> defaultControllerMappings {{
     { 12, "Fader 1 - Osc 1 Volume",       "/param/a/mixer/osc1/volume",    ControllerMode::absolute, 0.0f },
     { 13, "Fader 2 - Osc 2 Volume",       "/param/a/mixer/osc2/volume",    ControllerMode::absolute, 0.0f },
@@ -196,6 +203,56 @@ juce::String normalizeCommandText (juce::String text)
     }
 
     return normalized.trim();
+}
+
+juce::String voiceBackendName (VoiceTranscriptionBackend backend)
+{
+    switch (backend)
+    {
+    case VoiceTranscriptionBackend::whisperCpu:
+        return "whisper.cpp CPU";
+    case VoiceTranscriptionBackend::whisperGpu:
+        return "whisper.cpp GPU";
+    case VoiceTranscriptionBackend::hailoNpu:
+        return "Hailo NPU";
+    }
+
+    return "Unknown";
+}
+
+const char* voiceBackendTranscriptId (VoiceTranscriptionBackend backend)
+{
+    switch (backend)
+    {
+    case VoiceTranscriptionBackend::whisperCpu:
+        return "whisper-cpu";
+    case VoiceTranscriptionBackend::whisperGpu:
+        return "whisper-gpu";
+    case VoiceTranscriptionBackend::hailoNpu:
+        return "hailo-npu";
+    }
+
+    return "unknown";
+}
+
+VoiceTranscriptionBackend voiceBackendFromId (int id)
+{
+    switch (id)
+    {
+    case static_cast<int> (VoiceTranscriptionBackend::whisperCpu):
+        return VoiceTranscriptionBackend::whisperCpu;
+    case static_cast<int> (VoiceTranscriptionBackend::whisperGpu):
+        return VoiceTranscriptionBackend::whisperGpu;
+    case static_cast<int> (VoiceTranscriptionBackend::hailoNpu):
+    default:
+        return VoiceTranscriptionBackend::hailoNpu;
+    }
+}
+
+bool isWhisperCppBackend (VoiceTranscriptionBackend backend)
+{
+    return backend == VoiceTranscriptionBackend::whisperCpu
+        || backend == VoiceTranscriptionBackend::whisperGpu;
 }
 
 std::optional<VoiceCommandAction> voiceCommandActionForText (const juce::String& normalized)
@@ -354,6 +411,19 @@ public:
         voiceLabel.setText ("Voice", juce::dontSendNotification);
         addAndMakeVisible (voiceLabel);
 
+        voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::whisperCpu),
+                                 static_cast<int> (VoiceTranscriptionBackend::whisperCpu));
+        voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::whisperGpu),
+                                 static_cast<int> (VoiceTranscriptionBackend::whisperGpu));
+        voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::hailoNpu),
+                                 static_cast<int> (VoiceTranscriptionBackend::hailoNpu));
+        voiceBackendBox.setSelectedId (
+            settingsFile.getIntValue ("voiceBackend",
+                                      static_cast<int> (VoiceTranscriptionBackend::hailoNpu)),
+            juce::dontSendNotification);
+        voiceBackendBox.onChange = [this] { saveSettings(); };
+        addAndMakeVisible (voiceBackendBox);
+
         voiceModelBox.addItem ("tiny", 1);
         voiceModelBox.addItem ("base", 2);
         voiceModelBox.setSelectedId (settingsFile.getIntValue ("voiceModel", 1),
@@ -502,6 +572,8 @@ public:
         area.removeFromTop (8);
         auto voiceRow = area.removeFromTop (30);
         voiceLabel.setBounds (voiceRow.removeFromLeft (64));
+        voiceBackendBox.setBounds (voiceRow.removeFromLeft (150));
+        voiceRow.removeFromLeft (8);
         voiceModelBox.setBounds (voiceRow.removeFromLeft (88));
         voiceRow.removeFromLeft (8);
         voiceToggleButton.setBounds (voiceRow.removeFromLeft (116));
@@ -613,7 +685,17 @@ private:
         if (voiceEnabled.load())
             return;
 
+        const auto backend = voiceBackendFromId (voiceBackendBox.getSelectedId());
+        const auto modelPath = selectedVoiceModelPath();
         const auto voiceVadModelPath = selectedVoiceVadModelPath();
+
+        if (isWhisperCppBackend (backend) && ! juce::File (modelPath).existsAsFile())
+        {
+            voiceStatusLabel.setText ("Model missing", juce::dontSendNotification);
+            appendLog ("Voice start failed: model file not found: " + modelPath);
+            return;
+        }
+
         if (! juce::File (voiceVadModelPath).existsAsFile())
         {
             voiceStatusLabel.setText ("VAD model missing", juce::dontSendNotification);
@@ -640,19 +722,23 @@ private:
                               + juce::String (vadFrameSeconds, 2)
                               + "s pre_roll=" + juce::String (vadPreRollSeconds, 2)
                               + "s end_silence=" + juce::String (vadEndSilenceSeconds, 2)
-                              + "s threshold=" + juce::String (vadSpeechThreshold, 2));
+                              + "s threshold=" + juce::String (vadSpeechThreshold, 2)
+                              + " backend=" + voiceBackendTranscriptId (backend));
 
         voiceWorkerShouldStop.store (false);
         voiceEnabled.store (true);
         audioDeviceManager.addAudioCallback (this);
-        voiceWorker = std::thread ([this, voiceVadModelPath = voiceVadModelPath.toStdString()] {
-            voiceWorkerLoop (voiceVadModelPath);
+        voiceWorker = std::thread ([this,
+                                    backend,
+                                    modelPath = modelPath.toStdString(),
+                                    voiceVadModelPath = voiceVadModelPath.toStdString()] {
+            voiceWorkerLoop (backend, modelPath, voiceVadModelPath);
         });
 
         voiceToggleButton.setButtonText ("Stop Voice");
         voiceStatusLabel.setText ("Voice listening", juce::dontSendNotification);
-        appendLog ("Voice recognition started with Hailo NPU Whisper and VAD model "
-                   + voiceVadModelPath);
+        appendLog ("Voice recognition started with " + voiceBackendName (backend)
+                   + " and VAD model " + voiceVadModelPath);
     }
 
     void stopVoiceRecognition()
@@ -743,7 +829,9 @@ private:
         voiceCv.notify_one();
     }
 
-    void voiceWorkerLoop (const std::string& voiceVadModelPath)
+    void voiceWorkerLoop (VoiceTranscriptionBackend backend,
+                          const std::string& modelPath,
+                          const std::string& voiceVadModelPath)
     {
         auto vadContextParams = whisper_vad_default_context_params();
         vadContextParams.n_threads = juce::jlimit (1, 4,
@@ -764,40 +852,64 @@ private:
             return;
         }
 
+        std::unique_ptr<whisper_context, decltype (&whisper_free)> whisperCtx (nullptr,
+                                                                               whisper_free);
         std::shared_ptr<hailort::VDevice> hailoVDevice;
         std::unique_ptr<hailort::genai::Speech2Text> speech2Text;
 
-        try
+        if (isWhisperCppBackend (backend))
         {
-            const auto resourcesYamlPath = juce::File (SURGE_SOURCE_DIR)
-                                               .getChildFile ("libs/hailo-apps/hailo_apps/config/resources_config.yaml")
-                                               .getFullPathName()
-                                               .toStdString();
-            hailo_apps::ResourcesManager resources { std::filesystem::path (resourcesYamlPath) };
-            const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});
+            auto cparams = whisper_context_default_params();
+            cparams.use_gpu = backend == VoiceTranscriptionBackend::whisperGpu;
 
-            hailoVDevice = createSharedHailoVDevice();
-            auto speech2TextParams = hailort::genai::Speech2TextParams (hefPath);
-            auto speech2TextExpected = hailort::genai::Speech2Text::create (hailoVDevice,
-                                                                            speech2TextParams);
+            whisperCtx.reset (whisper_init_from_file_with_params (modelPath.c_str(), cparams));
+            if (whisperCtx == nullptr)
+            {
+                juce::MessageManager::callAsync ([this] {
+                    appendLog ("Voice recognition failed: unable to load Whisper model");
+                    stopVoiceRecognition();
+                    voiceStatusLabel.setText ("Model load failed", juce::dontSendNotification);
+                });
+                return;
+            }
 
-            if (! speech2TextExpected)
-                throw hailort::hailort_error (speech2TextExpected.status(),
-                                              "Failed to create Hailo Speech2Text");
-
-            speech2Text = std::make_unique<hailort::genai::Speech2Text> (
-                speech2TextExpected.release());
-
-            appendTranscriptLine ("[hailo init] hef=\"" + juce::String (hefPath) + "\"");
+            appendTranscriptLine ("[whisper.cpp init] model=\"" + juce::String (modelPath)
+                                  + "\" gpu=" + juce::String (cparams.use_gpu ? 1 : 0));
         }
-        catch (const std::exception& exception)
+        else
         {
-            juce::MessageManager::callAsync ([this, message = juce::String (exception.what())] {
-                appendLog ("Voice recognition failed: " + message);
-                stopVoiceRecognition();
-                voiceStatusLabel.setText ("Hailo load failed", juce::dontSendNotification);
-            });
-            return;
+            try
+            {
+                const auto resourcesYamlPath = juce::File (SURGE_SOURCE_DIR)
+                                                   .getChildFile ("libs/hailo-apps/hailo_apps/config/resources_config.yaml")
+                                                   .getFullPathName()
+                                                   .toStdString();
+                hailo_apps::ResourcesManager resources { std::filesystem::path (resourcesYamlPath) };
+                const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});
+
+                hailoVDevice = createSharedHailoVDevice();
+                auto speech2TextParams = hailort::genai::Speech2TextParams (hefPath);
+                auto speech2TextExpected = hailort::genai::Speech2Text::create (hailoVDevice,
+                                                                                speech2TextParams);
+
+                if (! speech2TextExpected)
+                    throw hailort::hailort_error (speech2TextExpected.status(),
+                                                  "Failed to create Hailo Speech2Text");
+
+                speech2Text = std::make_unique<hailort::genai::Speech2Text> (
+                    speech2TextExpected.release());
+
+                appendTranscriptLine ("[hailo init] hef=\"" + juce::String (hefPath) + "\"");
+            }
+            catch (const std::exception& exception)
+            {
+                juce::MessageManager::callAsync ([this, message = juce::String (exception.what())] {
+                    appendLog ("Voice recognition failed: " + message);
+                    stopVoiceRecognition();
+                    voiceStatusLabel.setText ("Hailo load failed", juce::dontSendNotification);
+                });
+                return;
+            }
         }
 
         {
@@ -805,7 +917,7 @@ private:
             micInputBuffer.clear();
         }
         whisper_vad_reset_state (vadCtx.get());
-        appendTranscriptLine ("[voice ready] mic buffer cleared after Hailo init");
+        appendTranscriptLine ("[voice ready] mic buffer cleared after backend init");
 
         std::vector<float> preRoll;
         std::vector<float> utterance;
@@ -919,9 +1031,25 @@ private:
                                   + " audio_ms="
                                   + juce::String ((1000.0 * static_cast<double> (utterance.size()))
                                                   / static_cast<double> (whisperSampleRate), 1)
-                                  + " backend=hailo-npu");
+                                  + " backend=" + voiceBackendTranscriptId (backend));
             const auto whisperStart = std::chrono::steady_clock::now();
-            auto text = transcribeVoiceChunk (*speech2Text, utterance);
+            juce::String text;
+
+            try
+            {
+                if (isWhisperCppBackend (backend))
+                    text = transcribeVoiceChunk (whisperCtx.get(), utterance);
+                else
+                    text = transcribeVoiceChunk (*speech2Text, utterance);
+            }
+            catch (const std::exception& exception)
+            {
+                appendTranscriptLine ("[whisper error] backend="
+                                      + juce::String (voiceBackendTranscriptId (backend))
+                                      + " message=\"" + juce::String (exception.what()) + "\"");
+                continue;
+            }
+
             const auto whisperElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds> (
                 std::chrono::steady_clock::now() - whisperStart);
             appendTranscriptLine ("[whisper result] elapsed_ms="
@@ -999,6 +1127,38 @@ private:
                               .expect ("Failed to generate Hailo transcription");
 
         return juce::String (text).trim();
+    }
+
+    juce::String transcribeVoiceChunk (whisper_context* ctx, const std::vector<float>& samples)
+    {
+        if (ctx == nullptr || samples.empty())
+            return {};
+
+        auto params = whisper_full_default_params (WHISPER_SAMPLING_GREEDY);
+        params.n_threads = juce::jlimit (1, 4, static_cast<int> (std::thread::hardware_concurrency()));
+        params.no_context = true;
+        params.no_timestamps = true;
+        params.single_segment = true;
+        params.max_tokens = 16;
+        params.audio_ctx = 512;
+        params.print_special = false;
+        params.print_progress = false;
+        params.print_realtime = false;
+        params.print_timestamps = false;
+        params.language = "en";
+        params.suppress_blank = true;
+        params.suppress_nst = true;
+        params.temperature = 0.0f;
+
+        if (whisper_full (ctx, params, samples.data(), static_cast<int> (samples.size())) != 0)
+            return {};
+
+        juce::String text;
+        const auto segments = whisper_full_n_segments (ctx);
+        for (int i = 0; i < segments; ++i)
+            text += whisper_full_get_segment_text (ctx, i);
+
+        return text.trim();
     }
 
     void handleVoiceSilence()
@@ -1307,6 +1467,7 @@ private:
         settingsFile.setValue ("targetPort", targetPortEditor.getText().trim());
         settingsFile.setValue ("encoderMode", static_cast<int> (encoderMode));
         settingsFile.setValue ("encoderStep", encoderStep);
+        settingsFile.setValue ("voiceBackend", voiceBackendBox.getSelectedId());
         settingsFile.setValue ("voiceModel", voiceModelBox.getSelectedId());
         settingsFile.saveIfNeeded();
     }
@@ -1387,6 +1548,7 @@ private:
     juce::TextButton nextProgramButton;
     juce::TextButton randomPatchButton;
     juce::Label voiceLabel;
+    juce::ComboBox voiceBackendBox;
     juce::ComboBox voiceModelBox;
     juce::TextButton voiceToggleButton;
     juce::Label voiceStatusLabel;

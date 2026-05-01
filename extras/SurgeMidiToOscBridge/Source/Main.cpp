@@ -1,17 +1,48 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
+#include <resources_manager.hpp>
+#include <hailo/genai/speech2text/speech2text.hpp>
+#include <hailo/hailort.hpp>
+#include <whisper.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <cctype>
+#include <cstdio>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace
 {
 constexpr int defaultOscPort = 53280;
 constexpr int defaultEncoderStep = 8;
+constexpr int whisperSampleRate = 16000;
+constexpr double vadFrameSeconds = 0.04;
+constexpr double vadPreRollSeconds = 0.25;
+constexpr double vadMinSpeechSeconds = 0.18;
+constexpr double vadEndSilenceSeconds = 0.28;
+constexpr double vadMaxUtteranceSeconds = 2.5;
+constexpr float vadSpeechThreshold = 0.50f;
 constexpr auto defaultTargetAddress = "127.0.0.1";
+constexpr auto tinyModelPath = "libs/whisper.cpp/models/ggml-tiny.bin";
+constexpr auto baseModelPath = "libs/whisper.cpp/models/ggml-base.bin";
+constexpr auto vadModelPath = "libs/whisper.cpp/models/ggml-silero-v6.2.0.bin";
+constexpr auto hailoWhisperAppName = "whisper_chat";
+constexpr auto hailoVDeviceGroupId = "SHARED";
+
+#ifndef SURGE_SOURCE_DIR
+#define SURGE_SOURCE_DIR "."
+#endif
 
 juce::String getNoteName (int noteNumber)
 {
@@ -39,6 +70,12 @@ struct ControllerMapping
     const char* oscAddress;
     ControllerMode mode;
     float currentValue;
+};
+
+struct VoiceCommandAction
+{
+    const char* label;
+    const char* oscAddress;
 };
 
 constexpr std::array<ControllerMapping, 16> defaultControllerMappings {{
@@ -136,16 +173,88 @@ std::optional<int> relativeControllerDelta (int value, EncoderMode encoderMode)
 
     return std::nullopt;
 }
+
+juce::String normalizeCommandText (juce::String text)
+{
+    text = text.toLowerCase();
+
+    juce::String normalized;
+    bool lastWasSpace = true;
+
+    for (auto c : text)
+    {
+        if (std::isalnum (static_cast<unsigned char> (c)))
+        {
+            normalized += juce::String::charToString (c);
+            lastWasSpace = false;
+        }
+        else if (! lastWasSpace)
+        {
+            normalized += " ";
+            lastWasSpace = true;
+        }
+    }
+
+    return normalized.trim();
+}
+
+std::optional<VoiceCommandAction> voiceCommandActionForText (const juce::String& normalized)
+{
+    if (normalized.contains ("previous bank"))
+        return VoiceCommandAction { "Previous Bank", "/patch/decr_category" };
+
+    if (normalized.contains ("next bank"))
+        return VoiceCommandAction { "Next Bank", "/patch/incr_category" };
+
+    if (normalized.contains ("previous patch"))
+        return VoiceCommandAction { "Previous Patch", "/patch/decr" };
+
+    if (normalized.contains ("next patch"))
+        return VoiceCommandAction { "Next Patch", "/patch/incr" };
+
+    if (normalized.contains ("surprise me"))
+        return VoiceCommandAction { "Surprise Me!", "/patch/random" };
+
+    return std::nullopt;
+}
+
+void whisperBridgeLogCallback (enum ggml_log_level level, const char* text, void*)
+{
+    if (level < GGML_LOG_LEVEL_WARN || text == nullptr)
+        return;
+
+    std::fputs (text, stderr);
+    std::fflush (stderr);
+}
+
+std::shared_ptr<hailort::VDevice> createSharedHailoVDevice()
+{
+    hailo_vdevice_params_t params {};
+    const auto status = hailo_init_vdevice_params (&params);
+    if (status != HAILO_SUCCESS)
+        throw hailort::hailort_error (status, "Failed to initialize Hailo VDevice params");
+
+    params.group_id = hailoVDeviceGroupId;
+
+    auto vdevice = hailort::VDevice::create_shared (params);
+    if (! vdevice)
+        throw hailort::hailort_error (vdevice.status(), "Failed to create shared Hailo VDevice");
+
+    return vdevice.release();
+}
 }
 
 class MainComponent final : public juce::Component,
-                            private juce::MidiInputCallback
+                            private juce::MidiInputCallback,
+                            private juce::AudioIODeviceCallback
 {
 public:
     explicit MainComponent (juce::PropertiesFile& settingsFileToUse)
         : settingsFile (settingsFileToUse)
     {
-        setSize (920, 680);
+        whisper_log_set (whisperBridgeLogCallback, nullptr);
+
+        setSize (920, 820);
 
         titleLabel.setText ("Surge MIDI To OSC Bridge", juce::dontSendNotification);
         titleLabel.setFont (juce::FontOptions (28.0f));
@@ -209,7 +318,66 @@ public:
         encoderStepBox.onChange = [this] { updateEncoderStepFromComboBox(); };
         addAndMakeVisible (encoderStepBox);
 
-        schemaLabel.setText ("Forwarded OSC: /mnote plus CC12-19/22-29 mapped to /param/a/... float values",
+        patchNavigationLabel.setText ("Patch navigation", juce::dontSendNotification);
+        addAndMakeVisible (patchNavigationLabel);
+
+        previousBankButton.setButtonText ("Previous Bank");
+        previousBankButton.onClick = [this] {
+            triggerPatchNavigationAction ("Previous Bank", "/patch/decr_category");
+        };
+        addAndMakeVisible (previousBankButton);
+
+        nextBankButton.setButtonText ("Next Bank");
+        nextBankButton.onClick = [this] {
+            triggerPatchNavigationAction ("Next Bank", "/patch/incr_category");
+        };
+        addAndMakeVisible (nextBankButton);
+
+        previousProgramButton.setButtonText ("Previous Patch");
+        previousProgramButton.onClick = [this] {
+            triggerPatchNavigationAction ("Previous Patch", "/patch/decr");
+        };
+        addAndMakeVisible (previousProgramButton);
+
+        nextProgramButton.setButtonText ("Next Patch");
+        nextProgramButton.onClick = [this] {
+            triggerPatchNavigationAction ("Next Patch", "/patch/incr");
+        };
+        addAndMakeVisible (nextProgramButton);
+
+        randomPatchButton.setButtonText ("Surprise Me!");
+        randomPatchButton.onClick = [this] {
+            triggerPatchNavigationAction ("Surprise Me!", "/patch/random");
+        };
+        addAndMakeVisible (randomPatchButton);
+
+        voiceLabel.setText ("Voice", juce::dontSendNotification);
+        addAndMakeVisible (voiceLabel);
+
+        voiceModelBox.addItem ("tiny", 1);
+        voiceModelBox.addItem ("base", 2);
+        voiceModelBox.setSelectedId (settingsFile.getIntValue ("voiceModel", 1),
+                                     juce::dontSendNotification);
+        voiceModelBox.onChange = [this] { saveSettings(); };
+        addAndMakeVisible (voiceModelBox);
+
+        voiceToggleButton.setButtonText ("Start Voice");
+        voiceToggleButton.onClick = [this] { toggleVoiceRecognition(); };
+        addAndMakeVisible (voiceToggleButton);
+
+        voiceStatusLabel.setText ("Voice stopped", juce::dontSendNotification);
+        addAndMakeVisible (voiceStatusLabel);
+
+        voiceRecognizedBox.setMultiLine (false);
+        voiceRecognizedBox.setReadOnly (true);
+        voiceRecognizedBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        voiceRecognizedBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        voiceRecognizedBox.setColour (juce::TextEditor::outlineColourId,
+                                      juce::Colour::fromRGB (88, 102, 114));
+        voiceRecognizedBox.setText ("", juce::dontSendNotification);
+        addAndMakeVisible (voiceRecognizedBox);
+
+        schemaLabel.setText ("Forwarded OSC: /mnote, patch navigation buttons, CC12-19/22-29 -> /param/a/...",
                              juce::dontSendNotification);
         addAndMakeVisible (schemaLabel);
 
@@ -249,7 +417,19 @@ public:
         logBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
         logBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
         logBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
-        addAndMakeVisible (logBox);
+
+        transcriptBox.setMultiLine (true);
+        transcriptBox.setReadOnly (true);
+        transcriptBox.setScrollbarsShown (true);
+        transcriptBox.setCaretVisible (false);
+        transcriptBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        transcriptBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        transcriptBox.setColour (juce::TextEditor::outlineColourId,
+                                 juce::Colour::fromRGB (88, 102, 114));
+
+        logTabs.addTab ("Event Log", juce::Colour::fromRGB (31, 48, 61), &logBox, false);
+        logTabs.addTab ("Transcript", juce::Colour::fromRGB (31, 48, 61), &transcriptBox, false);
+        addAndMakeVisible (logTabs);
 
         connectOscSender();
         refreshMidiInputs();
@@ -257,6 +437,7 @@ public:
 
     ~MainComponent() override
     {
+        stopVoiceRecognition();
         sendAllNotesOff();
         saveSettings();
         shutdownMidiInputs();
@@ -306,6 +487,30 @@ public:
         encoderStepBox.setBounds (encoderRow.removeFromLeft (100));
 
         area.removeFromTop (8);
+        auto patchNavRow = area.removeFromTop (30);
+        patchNavigationLabel.setBounds (patchNavRow.removeFromLeft (120));
+        previousBankButton.setBounds (patchNavRow.removeFromLeft (124));
+        patchNavRow.removeFromLeft (8);
+        nextBankButton.setBounds (patchNavRow.removeFromLeft (96));
+        patchNavRow.removeFromLeft (12);
+        previousProgramButton.setBounds (patchNavRow.removeFromLeft (130));
+        patchNavRow.removeFromLeft (8);
+        nextProgramButton.setBounds (patchNavRow.removeFromLeft (104));
+        patchNavRow.removeFromLeft (12);
+        randomPatchButton.setBounds (patchNavRow.removeFromLeft (116));
+
+        area.removeFromTop (8);
+        auto voiceRow = area.removeFromTop (30);
+        voiceLabel.setBounds (voiceRow.removeFromLeft (64));
+        voiceModelBox.setBounds (voiceRow.removeFromLeft (88));
+        voiceRow.removeFromLeft (8);
+        voiceToggleButton.setBounds (voiceRow.removeFromLeft (116));
+        voiceRow.removeFromLeft (12);
+        voiceStatusLabel.setBounds (voiceRow.removeFromLeft (150));
+        voiceRow.removeFromLeft (8);
+        voiceRecognizedBox.setBounds (voiceRow);
+
+        area.removeFromTop (8);
         schemaLabel.setBounds (area.removeFromTop (24));
         area.removeFromTop (6);
         statusLabel.setBounds (area.removeFromTop (24));
@@ -319,7 +524,7 @@ public:
         area.removeFromTop (14);
         logLabel.setBounds (area.removeFromTop (24));
         area.removeFromTop (6);
-        logBox.setBounds (area);
+        logTabs.setBounds (area);
     }
 
 private:
@@ -395,17 +600,492 @@ private:
         midiInputs.clear();
     }
 
+    void toggleVoiceRecognition()
+    {
+        if (voiceEnabled.load())
+            stopVoiceRecognition();
+        else
+            startVoiceRecognition();
+    }
+
+    void startVoiceRecognition()
+    {
+        if (voiceEnabled.load())
+            return;
+
+        const auto voiceVadModelPath = selectedVoiceVadModelPath();
+        if (! juce::File (voiceVadModelPath).existsAsFile())
+        {
+            voiceStatusLabel.setText ("VAD model missing", juce::dontSendNotification);
+            appendLog ("Voice start failed: VAD model file not found: " + voiceVadModelPath);
+            return;
+        }
+
+        const auto result = audioDeviceManager.initialise (1, 0, nullptr, true);
+        if (result.isNotEmpty())
+        {
+            voiceStatusLabel.setText ("Mic unavailable", juce::dontSendNotification);
+            appendLog ("Voice start failed: " + result);
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock (voiceMutex);
+            micInputBuffer.clear();
+            micSampleRate = whisperSampleRate;
+        }
+
+        transcriptBox.clear();
+        appendTranscriptLine ("[voice settings] vad_frame="
+                              + juce::String (vadFrameSeconds, 2)
+                              + "s pre_roll=" + juce::String (vadPreRollSeconds, 2)
+                              + "s end_silence=" + juce::String (vadEndSilenceSeconds, 2)
+                              + "s threshold=" + juce::String (vadSpeechThreshold, 2));
+
+        voiceWorkerShouldStop.store (false);
+        voiceEnabled.store (true);
+        audioDeviceManager.addAudioCallback (this);
+        voiceWorker = std::thread ([this, voiceVadModelPath = voiceVadModelPath.toStdString()] {
+            voiceWorkerLoop (voiceVadModelPath);
+        });
+
+        voiceToggleButton.setButtonText ("Stop Voice");
+        voiceStatusLabel.setText ("Voice listening", juce::dontSendNotification);
+        appendLog ("Voice recognition started with Hailo NPU Whisper and VAD model "
+                   + voiceVadModelPath);
+    }
+
+    void stopVoiceRecognition()
+    {
+        if (! voiceEnabled.exchange (false))
+            return;
+
+        audioDeviceManager.removeAudioCallback (this);
+        audioDeviceManager.closeAudioDevice();
+
+        {
+            std::lock_guard<std::mutex> lock (voiceMutex);
+            voiceWorkerShouldStop.store (true);
+        }
+        voiceCv.notify_all();
+
+        if (voiceWorker.joinable())
+            voiceWorker.join();
+
+        voiceToggleButton.setButtonText ("Start Voice");
+        voiceStatusLabel.setText ("Voice stopped", juce::dontSendNotification);
+        appendLog ("Voice recognition stopped");
+    }
+
+    juce::String selectedVoiceModelPath() const
+    {
+        const auto relativePath = voiceModelBox.getSelectedId() == 2 ? baseModelPath : tinyModelPath;
+        return juce::File (SURGE_SOURCE_DIR).getChildFile (relativePath).getFullPathName();
+    }
+
+    juce::String selectedVoiceVadModelPath() const
+    {
+        return juce::File (SURGE_SOURCE_DIR).getChildFile (vadModelPath).getFullPathName();
+    }
+
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+    {
+        std::lock_guard<std::mutex> lock (voiceMutex);
+        micSampleRate = device != nullptr ? device->getCurrentSampleRate() : whisperSampleRate;
+        micInputBuffer.clear();
+    }
+
+    void audioDeviceStopped() override
+    {
+        std::lock_guard<std::mutex> lock (voiceMutex);
+        micInputBuffer.clear();
+    }
+
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                           int numInputChannels,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext&) override
+    {
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData[ch] != nullptr)
+                juce::FloatVectorOperations::clear (outputChannelData[ch], numSamples);
+
+        if (! voiceEnabled.load() || numInputChannels <= 0 || numSamples <= 0)
+            return;
+
+        std::vector<float> mono;
+        mono.resize (static_cast<size_t> (numSamples));
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float sum = 0.0f;
+            int channelsUsed = 0;
+
+            for (int ch = 0; ch < numInputChannels; ++ch)
+            {
+                if (inputChannelData[ch] != nullptr)
+                {
+                    sum += inputChannelData[ch][i];
+                    ++channelsUsed;
+                }
+            }
+
+            mono[static_cast<size_t> (i)] = channelsUsed > 0 ? sum / static_cast<float> (channelsUsed)
+                                                             : 0.0f;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock (voiceMutex);
+            micInputBuffer.insert (micInputBuffer.end(), mono.begin(), mono.end());
+        }
+        voiceCv.notify_one();
+    }
+
+    void voiceWorkerLoop (const std::string& voiceVadModelPath)
+    {
+        auto vadContextParams = whisper_vad_default_context_params();
+        vadContextParams.n_threads = juce::jlimit (1, 4,
+                                                   static_cast<int> (std::thread::hardware_concurrency()));
+        vadContextParams.use_gpu = false;
+
+        std::unique_ptr<whisper_vad_context, decltype (&whisper_vad_free)> vadCtx (
+            whisper_vad_init_from_file_with_params (voiceVadModelPath.c_str(), vadContextParams),
+            whisper_vad_free);
+
+        if (vadCtx == nullptr)
+        {
+            juce::MessageManager::callAsync ([this] {
+                appendLog ("Voice recognition failed: unable to load VAD model");
+                stopVoiceRecognition();
+                voiceStatusLabel.setText ("VAD load failed", juce::dontSendNotification);
+            });
+            return;
+        }
+
+        std::shared_ptr<hailort::VDevice> hailoVDevice;
+        std::unique_ptr<hailort::genai::Speech2Text> speech2Text;
+
+        try
+        {
+            const auto resourcesYamlPath = juce::File (SURGE_SOURCE_DIR)
+                                               .getChildFile ("libs/hailo-apps/hailo_apps/config/resources_config.yaml")
+                                               .getFullPathName()
+                                               .toStdString();
+            hailo_apps::ResourcesManager resources { std::filesystem::path (resourcesYamlPath) };
+            const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});
+
+            hailoVDevice = createSharedHailoVDevice();
+            auto speech2TextParams = hailort::genai::Speech2TextParams (hefPath);
+            auto speech2TextExpected = hailort::genai::Speech2Text::create (hailoVDevice,
+                                                                            speech2TextParams);
+
+            if (! speech2TextExpected)
+                throw hailort::hailort_error (speech2TextExpected.status(),
+                                              "Failed to create Hailo Speech2Text");
+
+            speech2Text = std::make_unique<hailort::genai::Speech2Text> (
+                speech2TextExpected.release());
+
+            appendTranscriptLine ("[hailo init] hef=\"" + juce::String (hefPath) + "\"");
+        }
+        catch (const std::exception& exception)
+        {
+            juce::MessageManager::callAsync ([this, message = juce::String (exception.what())] {
+                appendLog ("Voice recognition failed: " + message);
+                stopVoiceRecognition();
+                voiceStatusLabel.setText ("Hailo load failed", juce::dontSendNotification);
+            });
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock (voiceMutex);
+            micInputBuffer.clear();
+        }
+        whisper_vad_reset_state (vadCtx.get());
+        appendTranscriptLine ("[voice ready] mic buffer cleared after Hailo init");
+
+        std::vector<float> preRoll;
+        std::vector<float> utterance;
+        bool speechActive = false;
+        size_t silenceSamples = 0;
+
+        const auto preRollSamples = static_cast<size_t> (vadPreRollSeconds * whisperSampleRate);
+        const auto minSpeechSamples = static_cast<size_t> (vadMinSpeechSeconds * whisperSampleRate);
+        const auto endSilenceSamples = static_cast<size_t> (vadEndSilenceSeconds * whisperSampleRate);
+        const auto maxUtteranceSamples = static_cast<size_t> (vadMaxUtteranceSeconds * whisperSampleRate);
+
+        while (! voiceWorkerShouldStop.load())
+        {
+            std::vector<float> chunk;
+            double sampleRate = whisperSampleRate;
+
+            {
+                std::unique_lock<std::mutex> lock (voiceMutex);
+                voiceCv.wait (lock, [this] {
+                    const auto needed = static_cast<size_t> (micSampleRate * vadFrameSeconds);
+                    return voiceWorkerShouldStop.load() || micInputBuffer.size() >= needed;
+                });
+
+                if (voiceWorkerShouldStop.load())
+                    break;
+
+                sampleRate = micSampleRate;
+                const auto needed = static_cast<size_t> (sampleRate * vadFrameSeconds);
+
+                if (micInputBuffer.size() < needed)
+                    continue;
+
+                const auto maxBufferedSamples = needed * 20;
+                if (! speechActive && micInputBuffer.size() > maxBufferedSamples)
+                {
+                    appendTranscriptLine (
+                        "[drop backlog] dropped_samples="
+                        + juce::String ((int) (micInputBuffer.size() - maxBufferedSamples)));
+                    micInputBuffer.erase (
+                        micInputBuffer.begin(),
+                        micInputBuffer.end() - static_cast<std::ptrdiff_t> (maxBufferedSamples));
+                }
+
+                chunk.assign (micInputBuffer.begin(),
+                              micInputBuffer.begin() + static_cast<std::ptrdiff_t> (needed));
+                micInputBuffer.erase (micInputBuffer.begin(),
+                                      micInputBuffer.begin() + static_cast<std::ptrdiff_t> (needed));
+            }
+
+            auto pcm16k = resampleToWhisperRate (chunk, sampleRate);
+            if (pcm16k.empty())
+                continue;
+
+            if (! whisper_vad_detect_speech_no_reset (vadCtx.get(), pcm16k.data(),
+                                                       static_cast<int> (pcm16k.size())))
+                continue;
+
+            const auto probabilityCount = whisper_vad_n_probs (vadCtx.get());
+            const auto probabilities = whisper_vad_probs (vadCtx.get());
+            auto maxSpeechProbability = 0.0f;
+
+            for (int i = 0; probabilities != nullptr && i < probabilityCount; ++i)
+                maxSpeechProbability = std::max (maxSpeechProbability, probabilities[i]);
+
+            const auto frameHasSpeech = maxSpeechProbability >= vadSpeechThreshold;
+
+            if (! speechActive)
+            {
+                preRoll.insert (preRoll.end(), pcm16k.begin(), pcm16k.end());
+                if (preRoll.size() > preRollSamples)
+                    preRoll.erase (preRoll.begin(),
+                                   preRoll.end() - static_cast<std::ptrdiff_t> (preRollSamples));
+
+                if (! frameHasSpeech)
+                {
+                    handleVoiceSilence();
+                    continue;
+                }
+
+                speechActive = true;
+                silenceSamples = 0;
+                utterance = preRoll;
+                appendTranscriptLine ("[vad start] prob="
+                                      + juce::String (maxSpeechProbability, 2)
+                                      + " preroll_samples=" + juce::String ((int) preRoll.size()));
+                juce::MessageManager::callAsync ([this] {
+                    voiceStatusLabel.setText ("Voice active", juce::dontSendNotification);
+                });
+            }
+            else
+            {
+                utterance.insert (utterance.end(), pcm16k.begin(), pcm16k.end());
+            }
+
+            if (frameHasSpeech)
+                silenceSamples = 0;
+            else
+                silenceSamples += pcm16k.size();
+
+            const auto hasEnoughSpeech = utterance.size() >= minSpeechSamples;
+            const auto reachedEndSilence = silenceSamples >= endSilenceSamples;
+            const auto reachedMaxDuration = utterance.size() >= maxUtteranceSamples;
+
+            if (! reachedMaxDuration && (! hasEnoughSpeech || ! reachedEndSilence))
+                continue;
+
+            appendTranscriptLine (juce::String (reachedMaxDuration ? "[vad max] " : "[vad end] ")
+                                  + "samples=" + juce::String ((int) utterance.size()));
+
+            appendTranscriptLine ("[whisper submit] samples=" + juce::String ((int) utterance.size())
+                                  + " audio_ms="
+                                  + juce::String ((1000.0 * static_cast<double> (utterance.size()))
+                                                  / static_cast<double> (whisperSampleRate), 1)
+                                  + " backend=hailo-npu");
+            const auto whisperStart = std::chrono::steady_clock::now();
+            auto text = transcribeVoiceChunk (*speech2Text, utterance);
+            const auto whisperElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds> (
+                std::chrono::steady_clock::now() - whisperStart);
+            appendTranscriptLine ("[whisper result] elapsed_ms="
+                                  + juce::String (static_cast<int> (whisperElapsedMs.count()))
+                                  + " text=\"" + text + "\"");
+            handleRecognizedVoiceText (text);
+
+            speechActive = false;
+            silenceSamples = 0;
+            utterance.clear();
+            preRoll.clear();
+            whisper_vad_reset_state (vadCtx.get());
+        }
+    }
+
+    std::vector<float> resampleToWhisperRate (const std::vector<float>& input, double inputRate) const
+    {
+        if (input.empty())
+            return {};
+
+        if (std::abs (inputRate - whisperSampleRate) < 1.0)
+            return input;
+
+        const auto outputSize = static_cast<size_t> (
+            std::max (1.0, std::floor ((static_cast<double> (input.size()) * whisperSampleRate)
+                                       / inputRate)));
+
+        std::vector<float> output (outputSize);
+        const auto ratio = inputRate / static_cast<double> (whisperSampleRate);
+
+        for (size_t i = 0; i < output.size(); ++i)
+        {
+            const auto sourcePos = static_cast<double> (i) * ratio;
+            const auto index = static_cast<size_t> (sourcePos);
+            const auto frac = static_cast<float> (sourcePos - static_cast<double> (index));
+            const auto a = input[std::min (index, input.size() - 1)];
+            const auto b = input[std::min (index + 1, input.size() - 1)];
+            output[i] = a + ((b - a) * frac);
+        }
+
+        return output;
+    }
+
+    void appendTranscriptLine (juce::String line)
+    {
+        juce::MessageManager::callAsync ([this, line = std::move (line)] {
+            const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
+            transcriptBox.moveCaretToEnd();
+            transcriptBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
+        });
+    }
+
+    juce::String transcribeVoiceChunk (hailort::genai::Speech2Text& speech2Text,
+                                       const std::vector<float>& samples)
+    {
+        if (samples.empty())
+            return {};
+
+        auto generatorParams = speech2Text.create_generator_params()
+                                   .expect ("Failed to create Hailo Speech2Text generator params");
+
+        auto status = generatorParams.set_task (hailort::genai::Speech2TextTask::TRANSCRIBE);
+        if (status != HAILO_SUCCESS)
+            throw hailort::hailort_error (status, "Failed to set Hailo Speech2Text task");
+
+        status = generatorParams.set_language ("en");
+        if (status != HAILO_SUCCESS)
+            throw hailort::hailort_error (status, "Failed to set Hailo Speech2Text language");
+
+        const auto text = speech2Text.generate_all_text (
+            hailort::MemoryView (const_cast<float*> (samples.data()),
+                                 samples.size() * sizeof (float)),
+            generatorParams,
+            std::chrono::milliseconds (15000))
+                              .expect ("Failed to generate Hailo transcription");
+
+        return juce::String (text).trim();
+    }
+
+    void handleVoiceSilence()
+    {
+        bool shouldUpdateStatus = false;
+
+        {
+            std::lock_guard<std::mutex> lock (voiceCommandMutex);
+            if (lastVoiceCommandNormalized.isNotEmpty())
+            {
+                lastVoiceCommandNormalized = {};
+                shouldUpdateStatus = true;
+            }
+        }
+
+        if (shouldUpdateStatus)
+        {
+            juce::MessageManager::callAsync ([this] {
+                voiceStatusLabel.setText ("Voice listening", juce::dontSendNotification);
+            });
+        }
+    }
+
+    void handleRecognizedVoiceText (juce::String text)
+    {
+        if (text.isEmpty())
+            return;
+
+        const auto normalized = normalizeCommandText (text);
+        const auto action = voiceCommandActionForText (normalized);
+
+        if (! action.has_value())
+        {
+            juce::MessageManager::callAsync ([this, text] {
+                voiceRecognizedBox.setText (text, juce::dontSendNotification);
+                voiceStatusLabel.setText ("No command match", juce::dontSendNotification);
+                appendLog ("Voice heard: \"" + text + "\"");
+            });
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock (voiceCommandMutex);
+            if (normalized == lastVoiceCommandNormalized)
+            {
+                juce::MessageManager::callAsync ([this, label = juce::String (action->label)] {
+                    voiceStatusLabel.setText ("Already handled: " + label,
+                                              juce::dontSendNotification);
+                });
+                return;
+            }
+
+            lastVoiceCommandNormalized = normalized;
+        }
+
+        sendOscMessage (juce::OSCMessage (action->oscAddress));
+
+        juce::MessageManager::callAsync ([this,
+                                          text,
+                                          label = juce::String (action->label),
+                                          oscAddress = juce::String (action->oscAddress)] {
+            voiceRecognizedBox.setText (text, juce::dontSendNotification);
+            voiceStatusLabel.setText ("Matched: " + label, juce::dontSendNotification);
+            appendLog ("Voice matched: \"" + text + "\" -> OSC: " + oscAddress);
+        });
+    }
+
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override
     {
-        if (! (message.isNoteOn() || message.isNoteOff() || message.isController()))
+        if (! (message.isNoteOn() || message.isNoteOff() || message.isController()
+               || message.isProgramChange()))
             return;
 
         const auto deviceName = source != nullptr ? source->getName() : juce::String ("<unknown>");
 
         if (message.isController())
         {
+            if (handleBankSelectMessage (deviceName, message.getControllerNumber(),
+                                         message.getControllerValue()))
+                return;
+
             handleControllerMessage (deviceName, message.getControllerNumber(),
                                      message.getControllerValue());
+        }
+        else if (message.isProgramChange())
+        {
+            handleProgramChangeMessage (deviceName, message.getProgramChangeNumber());
         }
         else if (message.isNoteOn())
         {
@@ -481,6 +1161,87 @@ private:
                         + " value=" + juce::String (oscValue, 3));
     }
 
+    bool handleBankSelectMessage (const juce::String& deviceName, int controllerNumber,
+                                  int controllerValue)
+    {
+        if (controllerNumber != 0 && controllerNumber != 32)
+            return false;
+
+        std::optional<int> previousBank;
+        int currentBank = 0;
+
+        {
+            const juce::ScopedLock lock (controllerMappingsLock);
+
+            if (controllerNumber == 0)
+                bankSelectMsb = controllerValue;
+            else
+                bankSelectLsb = controllerValue;
+
+            currentBank = (bankSelectMsb * 128) + bankSelectLsb;
+            previousBank = lastBankSelect;
+            lastBankSelect = currentBank;
+        }
+
+        const auto controllerName = controllerNumber == 0 ? "Bank Select MSB" : "Bank Select LSB";
+
+        if (! previousBank.has_value())
+        {
+            appendLogAsync ("MIDI " + juce::String (controllerName)
+                            + " from " + deviceName
+                            + ": baseline bank=" + juce::String (currentBank));
+            return true;
+        }
+
+        if (currentBank == previousBank.value())
+            return true;
+
+        auto& button = currentBank > previousBank.value() ? nextBankButton : previousBankButton;
+        clickPatchNavigationButtonAsync (
+            button,
+            juce::String (controllerName)
+                + " " + juce::String (previousBank.value()) + " -> " + juce::String (currentBank));
+
+        return true;
+    }
+
+    void handleProgramChangeMessage (const juce::String& deviceName, int programNumber)
+    {
+        std::optional<int> previousProgram;
+
+        {
+            const juce::ScopedLock lock (controllerMappingsLock);
+            previousProgram = lastProgramChange;
+            lastProgramChange = programNumber;
+        }
+
+        if (! previousProgram.has_value())
+        {
+            appendLogAsync ("MIDI Program Change from " + deviceName
+                            + ": baseline program=" + juce::String (programNumber));
+            return;
+        }
+
+        if (programNumber == previousProgram.value())
+            return;
+
+        auto& button = programNumber > previousProgram.value() ? nextProgramButton
+                                                               : previousProgramButton;
+        clickPatchNavigationButtonAsync (
+            button,
+            "Program Change " + juce::String (previousProgram.value()) + " -> "
+                + juce::String (programNumber));
+    }
+
+    void clickPatchNavigationButtonAsync (juce::Button& button, juce::String sourceDescription)
+    {
+        juce::MessageManager::callAsync ([this, &button, sourceDescription = std::move (sourceDescription)]
+        {
+            appendLog ("MIDI " + sourceDescription + " -> virtual click: " + button.getButtonText());
+            button.triggerClick();
+        });
+    }
+
     ControllerMapping* findControllerMapping (int controllerNumber)
     {
         for (auto& mapping : controllerMappings)
@@ -498,6 +1259,13 @@ private:
     void sendSurgeParameterMessage (const ControllerMapping& mapping, float normalizedValue)
     {
         sendOscMessage (juce::OSCMessage (mapping.oscAddress, normalizedValue));
+    }
+
+    void triggerPatchNavigationAction (const char* actionName, const char* oscAddress)
+    {
+        sendOscMessage (juce::OSCMessage (oscAddress));
+        appendLog ("Patch navigation: " + juce::String (actionName)
+                   + " -> " + juce::String (oscAddress));
     }
 
     void sendAllNotesOff()
@@ -539,6 +1307,7 @@ private:
         settingsFile.setValue ("targetPort", targetPortEditor.getText().trim());
         settingsFile.setValue ("encoderMode", static_cast<int> (encoderMode));
         settingsFile.setValue ("encoderStep", encoderStep);
+        settingsFile.setValue ("voiceModel", voiceModelBox.getSelectedId());
         settingsFile.saveIfNeeded();
     }
 
@@ -571,6 +1340,7 @@ private:
         juce::StringArray lines;
         lines.add ("Encoder mode: " + encoderModeName (encoderMode));
         lines.add ("Encoder step: " + juce::String (encoderStep) + " MIDI counts per tick");
+        lines.add ("Patch navigation buttons: Previous Bank / Next Bank / Previous Patch / Next Patch / Surprise Me!");
         lines.add ("");
 
         for (const auto& mapping : controllerMappings)
@@ -610,6 +1380,17 @@ private:
     juce::ComboBox encoderModeBox;
     juce::Label encoderStepLabel;
     juce::ComboBox encoderStepBox;
+    juce::Label patchNavigationLabel;
+    juce::TextButton previousBankButton;
+    juce::TextButton nextBankButton;
+    juce::TextButton previousProgramButton;
+    juce::TextButton nextProgramButton;
+    juce::TextButton randomPatchButton;
+    juce::Label voiceLabel;
+    juce::ComboBox voiceModelBox;
+    juce::TextButton voiceToggleButton;
+    juce::Label voiceStatusLabel;
+    juce::TextEditor voiceRecognizedBox;
     juce::Label schemaLabel;
     juce::Label statusLabel;
     juce::Label midiInputsLabel;
@@ -617,17 +1398,33 @@ private:
     juce::Label controllerMappingsLabel;
     juce::TextEditor controllerMappingsBox;
     juce::Label logLabel;
+    juce::TabbedComponent logTabs { juce::TabbedButtonBar::TabsAtTop };
     juce::TextEditor logBox;
+    juce::TextEditor transcriptBox;
     juce::PropertiesFile& settingsFile;
 
     juce::CriticalSection oscLock;
     juce::CriticalSection activeNotesLock;
     juce::CriticalSection controllerMappingsLock;
     juce::OSCSender oscSender;
+    juce::AudioDeviceManager audioDeviceManager;
     juce::String targetHost = defaultTargetAddress;
     int targetPort = defaultOscPort;
     EncoderMode encoderMode = EncoderMode::absolute;
     int encoderStep = defaultEncoderStep;
+    int bankSelectMsb = 0;
+    int bankSelectLsb = 0;
+    std::optional<int> lastBankSelect;
+    std::optional<int> lastProgramChange;
+    std::atomic<bool> voiceEnabled { false };
+    std::atomic<bool> voiceWorkerShouldStop { false };
+    std::thread voiceWorker;
+    std::mutex voiceMutex;
+    std::condition_variable voiceCv;
+    std::vector<float> micInputBuffer;
+    double micSampleRate = whisperSampleRate;
+    std::mutex voiceCommandMutex;
+    juce::String lastVoiceCommandNormalized;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     std::set<int> activeNotes;
     std::array<ControllerMapping, 16> controllerMappings = defaultControllerMappings;
@@ -678,7 +1475,7 @@ public:
             setResizable (true, false);
             setResizeLimits (780, 560, 1800, 1400);
             setContentOwned (new MainComponent (settingsFile), true);
-            setSize (920, 680);
+            setSize (920, 820);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

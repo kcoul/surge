@@ -249,12 +249,61 @@ Expected output:
 
 ## Deploying to the target
 
-Copy the binary to the Raspberry Pi (adjust hostname/IP):
+### Voice model files
+
+The bridge's voice-command path requires three model files that are not committed
+to the repository and must be downloaded separately. They are resolved at runtime
+by looking for a `models/` directory next to the binary (portable layout), falling
+back to the source-relative path baked in at build time for dev builds.
+
+| File | Required for |
+|---|---|
+| `ggml-silero-v6.2.0.bin` | VAD (always required when voice is enabled) |
+| `ggml-tiny.bin` | whisper.cpp CPU/GPU backend, tiny model |
+| `ggml-base.bin` | whisper.cpp CPU/GPU backend, base model |
+
+Download using whisper.cpp's helper script from the repo root:
 
 ```bash
-scp extras/SurgeMidiToOscBridge/build-linux-aarch64-ubuntu/extras/SurgeMidiToOscBridge/SurgeMidiToOscBridge_artefacts/Release/SurgeMidiToOscBridge \
-    user@raspberrypi.local:~/
+bash libs/whisper.cpp/models/download-ggml-model.sh tiny
+bash libs/whisper.cpp/models/download-ggml-model.sh base
+# Silero VAD model — check libs/whisper.cpp/models/ for the download script or
+# source for your whisper.cpp version
 ```
+
+The downloaded files land in `libs/whisper.cpp/models/`.
+
+### Copy binary and models to the Pi
+
+Create a deployment directory on the target and copy both:
+
+```bash
+ssh <user>@<pi-ip> "mkdir -p ~/bridge/models"
+
+scp extras/SurgeMidiToOscBridge/build-linux-aarch64-ubuntu/extras/SurgeMidiToOscBridge/SurgeMidiToOscBridge_artefacts/Release/SurgeMidiToOscBridge \
+    <user>@<pi-ip>:~/bridge/
+
+scp libs/whisper.cpp/models/ggml-silero-v6.2.0.bin \
+    libs/whisper.cpp/models/ggml-tiny.bin \
+    libs/whisper.cpp/models/ggml-base.bin \
+    <user>@<pi-ip>:~/bridge/models/
+```
+
+The runtime layout the bridge expects:
+
+```
+~/bridge/
+  SurgeMidiToOscBridge
+  models/
+    ggml-silero-v6.2.0.bin   ← always needed
+    ggml-tiny.bin             ← needed for whisper.cpp CPU/GPU backend
+    ggml-base.bin             ← needed for whisper.cpp CPU/GPU backend
+```
+
+On subsequent rebuilds only the binary needs to be recopied; the `models/`
+directory does not change.
+
+### HailoRT runtime on the target
 
 The target must have HailoRT 5.3.0 runtime installed:
 

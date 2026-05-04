@@ -6,6 +6,10 @@
 #include <hailo/hailort.hpp>
 #include <whisper.h>
 
+#if BRIDGE_HAS_EMBEDDED_VAD
+#include "generated/embedded_vad_model.h"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -24,6 +28,33 @@
 
 namespace
 {
+#if BRIDGE_HAS_EMBEDDED_VAD
+struct EmbeddedBufferState
+{
+    const unsigned char* data;
+    size_t               size;
+    size_t               pos { 0 };
+};
+
+static size_t embeddedBufferRead (void* ctx, void* out, size_t n)
+{
+    auto* s = static_cast<EmbeddedBufferState*> (ctx);
+    const auto avail  = s->size - s->pos;
+    const auto toRead = std::min (n, avail);
+    std::memcpy (out, s->data + s->pos, toRead);
+    s->pos += toRead;
+    return toRead;
+}
+
+static bool embeddedBufferEof (void* ctx)
+{
+    auto* s = static_cast<EmbeddedBufferState*> (ctx);
+    return s->pos >= s->size;
+}
+
+static void embeddedBufferClose (void*) {}
+#endif
+
 constexpr int defaultOscPort = 53280;
 constexpr int defaultEncoderStep = 8;
 constexpr int whisperSampleRate = 16000;
@@ -426,8 +457,19 @@ public:
 
         voiceModelBox.addItem ("tiny", 1);
         voiceModelBox.addItem ("base", 2);
-        voiceModelBox.setSelectedId (settingsFile.getIntValue ("voiceModel", 1),
-                                     juce::dontSendNotification);
+
+        {
+            const bool tinyAvailable = resolveModelFile (tinyModelPath).existsAsFile();
+            const bool baseAvailable = resolveModelFile (baseModelPath).existsAsFile();
+            voiceModelBox.setItemEnabled (1, tinyAvailable);
+            voiceModelBox.setItemEnabled (2, baseAvailable);
+
+            int savedId = settingsFile.getIntValue ("voiceModel", 1);
+            if ((savedId == 1 && ! tinyAvailable) || (savedId == 2 && ! baseAvailable))
+                savedId = tinyAvailable ? 1 : (baseAvailable ? 2 : 0);
+            voiceModelBox.setSelectedId (savedId, juce::dontSendNotification);
+        }
+
         voiceModelBox.onChange = [this] { saveSettings(); };
         addAndMakeVisible (voiceModelBox);
 
@@ -696,12 +738,14 @@ private:
             return;
         }
 
+#if !BRIDGE_HAS_EMBEDDED_VAD
         if (! juce::File (voiceVadModelPath).existsAsFile())
         {
             voiceStatusLabel.setText ("VAD model missing", juce::dontSendNotification);
             appendLog ("Voice start failed: VAD model file not found: " + voiceVadModelPath);
             return;
         }
+#endif
 
         const auto result = audioDeviceManager.initialise (1, 0, nullptr, true);
         if (result.isNotEmpty())
@@ -763,15 +807,32 @@ private:
         appendLog ("Voice recognition stopped");
     }
 
+    // Resolve a model file path. Checks a 'models/' directory next to the binary
+    // first (portable/deployed layout), then falls back to the source-relative
+    // path baked in at build time (development builds running from the build tree).
+    juce::File resolveModelFile (const char* repoRelativePath) const
+    {
+        const auto modelName = juce::File (repoRelativePath).getFileName();
+        const auto nextToBinary = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                      .getParentDirectory()
+                                      .getChildFile ("models")
+                                      .getChildFile (modelName);
+
+        if (nextToBinary.existsAsFile())
+            return nextToBinary;
+
+        return juce::File (SURGE_SOURCE_DIR).getChildFile (repoRelativePath);
+    }
+
     juce::String selectedVoiceModelPath() const
     {
         const auto relativePath = voiceModelBox.getSelectedId() == 2 ? baseModelPath : tinyModelPath;
-        return juce::File (SURGE_SOURCE_DIR).getChildFile (relativePath).getFullPathName();
+        return resolveModelFile (relativePath).getFullPathName();
     }
 
     juce::String selectedVoiceVadModelPath() const
     {
-        return juce::File (SURGE_SOURCE_DIR).getChildFile (vadModelPath).getFullPathName();
+        return resolveModelFile (vadModelPath).getFullPathName();
     }
 
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override
@@ -838,9 +899,20 @@ private:
                                                    static_cast<int> (std::thread::hardware_concurrency()));
         vadContextParams.use_gpu = false;
 
+#if BRIDGE_HAS_EMBEDDED_VAD
+        EmbeddedBufferState vadBufState { ggml_silero_vad_model, ggml_silero_vad_model_size };
+        whisper_model_loader vadLoader { &vadBufState,
+                                         embeddedBufferRead,
+                                         embeddedBufferEof,
+                                         embeddedBufferClose };
+        std::unique_ptr<whisper_vad_context, decltype (&whisper_vad_free)> vadCtx (
+            whisper_vad_init_with_params (&vadLoader, vadContextParams),
+            whisper_vad_free);
+#else
         std::unique_ptr<whisper_vad_context, decltype (&whisper_vad_free)> vadCtx (
             whisper_vad_init_from_file_with_params (voiceVadModelPath.c_str(), vadContextParams),
             whisper_vad_free);
+#endif
 
         if (vadCtx == nullptr)
         {

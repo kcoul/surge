@@ -55,6 +55,43 @@ static bool embeddedBufferEof (void* ctx)
 static void embeddedBufferClose (void*) {}
 #endif
 
+// Minimal resources_config.yaml covering only the whisper_chat app used by this
+// bridge. The full hailo-apps config is hundreds of lines and covers many apps
+// we don't use. This embedded copy removes the dependency on the source tree.
+static constexpr auto embeddedResourcesYaml =
+    "whisper_chat:\n"
+    "  models:\n"
+    "    hailo8:\n"
+    "      default: \"None\"\n"
+    "    hailo8l:\n"
+    "      default: \"None\"\n"
+    "    hailo10h:\n"
+    "      default:\n"
+    "        - name: \"Whisper-Base\"\n"
+    "          source: \"gen-ai-mz\"\n";
+
+// Returns the path to a resources_config.yaml the ResourcesManager can load.
+// Checks for a config/ directory next to the binary first (allows override),
+// then writes the embedded minimal config to the user data directory on first use.
+static juce::File getOrCreateResourcesConfigFile()
+{
+    const auto nextToBinary = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                  .getParentDirectory()
+                                  .getChildFile ("config/resources_config.yaml");
+    if (nextToBinary.existsAsFile())
+        return nextToBinary;
+
+    const auto cacheFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                               .getChildFile ("SurgeMidiToOscBridge/resources_config.yaml");
+    if (! cacheFile.existsAsFile())
+    {
+        cacheFile.getParentDirectory().createDirectory();
+        cacheFile.replaceWithText (embeddedResourcesYaml);
+    }
+
+    return cacheFile;
+}
+
 constexpr int defaultOscPort = 53280;
 constexpr int defaultEncoderStep = 8;
 constexpr int whisperSampleRate = 16000;
@@ -952,11 +989,8 @@ private:
         {
             try
             {
-                const auto resourcesYamlPath = juce::File (SURGE_SOURCE_DIR)
-                                                   .getChildFile ("libs/hailo-apps/hailo_apps/config/resources_config.yaml")
-                                                   .getFullPathName()
-                                                   .toStdString();
-                hailo_apps::ResourcesManager resources { std::filesystem::path (resourcesYamlPath) };
+                hailo_apps::ResourcesManager resources { std::filesystem::path (
+                    getOrCreateResourcesConfigFile().getFullPathName().toStdString()) };
                 const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});
 
                 hailoVDevice = createSharedHailoVDevice();

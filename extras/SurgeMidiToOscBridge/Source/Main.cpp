@@ -7,7 +7,7 @@
 #include <whisper.h>
 
 #if BRIDGE_HAS_EMBEDDED_VAD
-#include "generated/embedded_vad_model.h"
+#include "embedded_vad_model.h"
 #endif
 
 #include <algorithm>

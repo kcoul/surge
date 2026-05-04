@@ -65,6 +65,18 @@
         "SURGE_STANDALONE_AUTO_OSC_IN": "ON",
         "SST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM": "ON"
       }
+    },
+    {
+      "name": "linux-aarch64-ubuntu-midi-osc-bridge-common",
+      "hidden": true,
+      "inherits": [
+        "common"
+      ],
+      "toolchainFile": "${sourceDir}/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake",
+      "cacheVariables": {
+        "SURGE_HOST_MIDI_OSC_BRIDGE_ONLY": "ON",
+        "JUCE_JUCEAIDE_PATH": "${sourceDir}/libs/JUCE/build/JUCE-host/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+      }
     }
   ],
   "buildPresets": [

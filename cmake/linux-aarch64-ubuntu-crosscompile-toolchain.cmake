@@ -46,7 +46,17 @@ set(CMAKE_C_COMPILER ${tools}/aarch64-linux-gnu-gcc)
 set(CMAKE_CXX_COMPILER ${tools}/aarch64-linux-gnu-g++)
 
 # 5. Search Behavior: Whitelist ONLY the arm64 and generic paths
-set(CMAKE_FIND_ROOT_PATH /usr/lib/${ARCH_TRIPLET} /usr)
+#
+# HAILO_CROSS_PREFIX points to the root of the extracted arm64 HailoRT deb.
+# Set it here or override via -DHAILO_CROSS_PREFIX=<path> at configure time.
+# See extras/SurgeMidiToOscBridge/docs/cross-compile-linux-aarch64-ubuntu.md
+# for how to create this directory.
+set(HAILO_CROSS_PREFIX "/opt/hailo-cross/arm64" CACHE PATH
+    "Root of arm64 HailoRT deb extraction (for find_package(HailoRT))")
+
+# HAILO_CROSS_PREFIX is listed first so the arm64 cmake configs are found
+# before the host-architecture HailoRT that may also be installed on the system.
+set(CMAKE_FIND_ROOT_PATH ${HAILO_CROSS_PREFIX} /usr/lib/${ARCH_TRIPLET} /usr)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

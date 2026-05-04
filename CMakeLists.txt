@@ -30,6 +30,12 @@ if(SURGE_HOST_JUCEAIDE_ONLY)
   return()
 endif()
 
+if(SURGE_HOST_MIDI_OSC_BRIDGE_ONLY)
+  message(STATUS "Bridge-only configure. For cross-compilation pass JUCE_JUCEAIDE_PATH.")
+  add_subdirectory(extras/SurgeMidiToOscBridge)
+  return()
+endif()
+
 # Banner {{{
 message(STATUS "It's Surge XT, folks! Version is ${PROJECT_VERSION}.")
 message(STATUS "CMAKE_BUILD_TYPE is ${CMAKE_BUILD_TYPE}.")

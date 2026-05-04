@@ -233,6 +233,12 @@ cmake --build --preset build-linux-aarch64-ubuntu-midi-osc-bridge
 file extras/SurgeMidiToOscBridge/build-linux-aarch64-ubuntu/extras/SurgeMidiToOscBridge/SurgeMidiToOscBridge_artefacts/Release/SurgeMidiToOscBridge
 ```
 
+> The binary is named `SurgeMidiToOscBridge` (no spaces) because the CMake
+> `PRODUCT_NAME` was set to match the target name. On older builds or Windows,
+> the binary was named `Surge MIDI To OSC Bridge` — if you see that name in your
+> artefacts directory, you are working from a stale build tree. Delete the build
+> directory and reconfigure.
+
 Expected output:
 
 ```

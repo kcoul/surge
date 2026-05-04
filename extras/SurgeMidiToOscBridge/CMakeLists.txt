@@ -46,7 +46,7 @@ else()
 endif()
 
 juce_add_gui_app(SurgeMidiToOscBridge
-    PRODUCT_NAME "Surge MIDI To OSC Bridge"
+    PRODUCT_NAME "SurgeMidiToOscBridge"
     BUNDLE_ID org.surge-synth-team.SurgeMidiToOscBridge)
 
 juce_generate_juce_header(SurgeMidiToOscBridge)

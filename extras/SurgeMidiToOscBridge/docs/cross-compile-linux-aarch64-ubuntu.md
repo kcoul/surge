@@ -169,6 +169,21 @@ After extraction:
 The CMake config files inside the deb compute their prefix from their own location,
 so they work correctly regardless of where you extract the package.
 
+#### 4c. libusb — HailoRT's transitive dependency
+
+`libhailort.so` depends on `libusb-1.0` for its USB device transport path (Hailo
+hardware can connect over USB as well as PCIe/M.2). The HailoRT CMake config does
+not declare this dependency explicitly, so the linker only reports it missing at
+the final link step. Install the arm64 libusb development package via multiarch:
+
+```bash
+sudo apt install libusb-1.0-0-dev:arm64
+```
+
+This places the arm64 `libusb-1.0.so` and `libusb-1.0.so.0` into
+`/usr/lib/aarch64-linux-gnu/`, which is already in the cross-linker's search path
+via the toolchain file's `CMAKE_EXE_LINKER_FLAGS_INIT`.
+
 > **Why a separate prefix, not a system install?**
 > Both the amd64 and arm64 packages ship `libhailort.so.5.3.0` to `/usr/lib/`
 > (not to an arch-specific subdirectory), so they would conflict if installed

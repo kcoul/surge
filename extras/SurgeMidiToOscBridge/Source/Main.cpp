@@ -1,7 +1,6 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
-#include <resources_manager.hpp>
 #include <hailo/genai/speech2text/speech2text.hpp>
 #include <hailo/hailort.hpp>
 #include <whisper.h>
@@ -55,41 +54,28 @@ static bool embeddedBufferEof (void* ctx)
 static void embeddedBufferClose (void*) {}
 #endif
 
-// Minimal resources_config.yaml covering only the whisper_chat app used by this
-// bridge. The full hailo-apps config is hundreds of lines and covers many apps
-// we don't use. This embedded copy removes the dependency on the source tree.
-static constexpr auto embeddedResourcesYaml =
-    "whisper_chat:\n"
-    "  models:\n"
-    "    hailo8:\n"
-    "      default: \"None\"\n"
-    "    hailo8l:\n"
-    "      default: \"None\"\n"
-    "    hailo10h:\n"
-    "      default:\n"
-    "        - name: \"Whisper-Base\"\n"
-    "          source: \"gen-ai-mz\"\n";
-
-// Returns the path to a resources_config.yaml the ResourcesManager can load.
-// Checks for a config/ directory next to the binary first (allows override),
-// then writes the embedded minimal config to the user data directory on first use.
-static juce::File getOrCreateResourcesConfigFile()
+// Locate a Whisper HEF without relying on hailo_apps ResourcesManager.
+// Search order: models/hailo10h/ next to the binary, ~/bridge/models/hailo10h/,
+// then ~/bridge/ directly. Throws with a clear message if not found.
+static std::string findHailoWhisperHef (const std::string& hefFilename)
 {
-    const auto nextToBinary = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-                                  .getParentDirectory()
-                                  .getChildFile ("config/resources_config.yaml");
-    if (nextToBinary.existsAsFile())
-        return nextToBinary;
+    const auto binary = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+    const auto home   = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    const auto name   = juce::String (hefFilename);
 
-    const auto cacheFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                               .getChildFile ("SurgeMidiToOscBridge/resources_config.yaml");
-    if (! cacheFile.existsAsFile())
-    {
-        cacheFile.getParentDirectory().createDirectory();
-        cacheFile.replaceWithText (embeddedResourcesYaml);
-    }
+    const juce::File candidates[] = {
+        binary.getParentDirectory().getChildFile ("models/hailo10h").getChildFile (name),
+        home.getChildFile ("bridge/models/hailo10h").getChildFile (name),
+        home.getChildFile ("bridge").getChildFile (name),
+    };
 
-    return cacheFile;
+    for (const auto& f : candidates)
+        if (f.existsAsFile())
+            return f.getFullPathName().toStdString();
+
+    throw std::runtime_error (
+        "Hailo Whisper HEF not found: " + hefFilename +
+        ". Place it in ~/bridge/ or next to the binary in models/hailo10h/");
 }
 
 constexpr int defaultOscPort = 53280;
@@ -102,10 +88,10 @@ constexpr double vadEndSilenceSeconds = 0.28;
 constexpr double vadMaxUtteranceSeconds = 2.5;
 constexpr float vadSpeechThreshold = 0.50f;
 constexpr auto defaultTargetAddress = "127.0.0.1";
-constexpr auto tinyModelPath = "libs/whisper.cpp/models/ggml-tiny.bin";
-constexpr auto baseModelPath = "libs/whisper.cpp/models/ggml-base.bin";
+constexpr auto tinyModelPath  = "libs/whisper.cpp/models/ggml-tiny.bin";
+constexpr auto baseModelPath  = "libs/whisper.cpp/models/ggml-base.bin";
+constexpr auto smallModelPath = "libs/whisper.cpp/models/ggml-small.bin";
 constexpr auto vadModelPath = "libs/whisper.cpp/models/ggml-silero-v6.2.0.bin";
-constexpr auto hailoWhisperAppName = "whisper_chat";
 constexpr auto hailoVDeviceGroupId = "SHARED";
 
 #ifndef SURGE_SOURCE_DIR
@@ -492,18 +478,21 @@ public:
         voiceBackendBox.onChange = [this] { saveSettings(); };
         addAndMakeVisible (voiceBackendBox);
 
-        voiceModelBox.addItem ("tiny", 1);
-        voiceModelBox.addItem ("base", 2);
+        voiceModelBox.addItem ("tiny",  1);
+        voiceModelBox.addItem ("base",  2);
+        voiceModelBox.addItem ("small", 3);
 
         {
-            const bool tinyAvailable = resolveModelFile (tinyModelPath).existsAsFile();
-            const bool baseAvailable = resolveModelFile (baseModelPath).existsAsFile();
+            const bool tinyAvailable  = resolveModelFile (tinyModelPath).existsAsFile();
+            const bool baseAvailable  = resolveModelFile (baseModelPath).existsAsFile();
+            const bool smallAvailable = resolveModelFile (smallModelPath).existsAsFile();
             voiceModelBox.setItemEnabled (1, tinyAvailable);
             voiceModelBox.setItemEnabled (2, baseAvailable);
+            voiceModelBox.setItemEnabled (3, smallAvailable);
 
             int savedId = settingsFile.getIntValue ("voiceModel", 1);
-            if ((savedId == 1 && ! tinyAvailable) || (savedId == 2 && ! baseAvailable))
-                savedId = tinyAvailable ? 1 : (baseAvailable ? 2 : 0);
+            if ((savedId == 1 && ! tinyAvailable) || (savedId == 2 && ! baseAvailable) || (savedId == 3 && ! smallAvailable))
+                savedId = tinyAvailable ? 1 : (baseAvailable ? 2 : (smallAvailable ? 3 : 0));
             voiceModelBox.setSelectedId (savedId, juce::dontSendNotification);
         }
 
@@ -812,8 +801,9 @@ private:
         voiceWorker = std::thread ([this,
                                     backend,
                                     modelPath = modelPath.toStdString(),
-                                    voiceVadModelPath = voiceVadModelPath.toStdString()] {
-            voiceWorkerLoop (backend, modelPath, voiceVadModelPath);
+                                    voiceVadModelPath = voiceVadModelPath.toStdString(),
+                                    hailoHefName = selectedHailoHefName()] {
+            voiceWorkerLoop (backend, modelPath, voiceVadModelPath, hailoHefName);
         });
 
         voiceToggleButton.setButtonText ("Stop Voice");
@@ -863,13 +853,23 @@ private:
 
     juce::String selectedVoiceModelPath() const
     {
-        const auto relativePath = voiceModelBox.getSelectedId() == 2 ? baseModelPath : tinyModelPath;
+        const auto relativePath = voiceModelBox.getSelectedId() == 3 ? smallModelPath
+                                : voiceModelBox.getSelectedId() == 2 ? baseModelPath
+                                                                      : tinyModelPath;
         return resolveModelFile (relativePath).getFullPathName();
     }
 
     juce::String selectedVoiceVadModelPath() const
     {
         return resolveModelFile (vadModelPath).getFullPathName();
+    }
+
+    std::string selectedHailoHefName() const
+    {
+        const auto id = voiceModelBox.getSelectedId();
+        if (id == 3) return "Whisper-Small.hef";
+        if (id == 2) return "Whisper-Base.hef";
+        return "Whisper-Tiny.hef";
     }
 
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override
@@ -929,7 +929,8 @@ private:
 
     void voiceWorkerLoop (VoiceTranscriptionBackend backend,
                           const std::string& modelPath,
-                          const std::string& voiceVadModelPath)
+                          const std::string& voiceVadModelPath,
+                          const std::string& hailoHefName)
     {
         auto vadContextParams = whisper_vad_default_context_params();
         vadContextParams.n_threads = juce::jlimit (1, 4,
@@ -989,17 +990,7 @@ private:
         {
             try
             {
-                // hailo_apps defaults to /usr/local/hailo which requires root. Point it at a
-                // user-writable path instead; honour HAILO_RESOURCES_DIR if already set.
-                const auto hailoResDir = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
-                                             .getChildFile ("bridge/hailo-resources")
-                                             .getFullPathName()
-                                             .toStdString();
-                ::setenv ("HAILO_RESOURCES_DIR", hailoResDir.c_str(), 0);
-
-                hailo_apps::ResourcesManager resources { std::filesystem::path (
-                    getOrCreateResourcesConfigFile().getFullPathName().toStdString()) };
-                const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});
+                const auto hefPath = findHailoWhisperHef (hailoHefName);
 
                 hailoVDevice = createSharedHailoVDevice();
                 auto speech2TextParams = hailort::genai::Speech2TextParams (hefPath);

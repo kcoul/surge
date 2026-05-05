@@ -25,25 +25,6 @@ endif()
 find_package(HailoRT REQUIRED)
 find_package(CURL REQUIRED)
 
-set(HAILO_APPS_CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../libs/hailo-apps/hailo_apps/cpp)
-set(HAILO_APPS_EXTERNAL_DIR ${HAILO_APPS_CPP_DIR}/external)
-
-if(NOT TARGET yaml-cpp AND NOT TARGET yaml-cpp::yaml-cpp)
-    set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-    set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${HAILO_APPS_EXTERNAL_DIR}/yaml-cpp
-                     ${CMAKE_BINARY_DIR}/hailo-apps-yaml-cpp
-                     EXCLUDE_FROM_ALL)
-endif()
-
-if(TARGET yaml-cpp::yaml-cpp)
-    set(HAILO_APPS_YAMLCPP_TARGET yaml-cpp::yaml-cpp)
-elseif(TARGET yaml-cpp)
-    set(HAILO_APPS_YAMLCPP_TARGET yaml-cpp)
-else()
-    message(FATAL_ERROR "yaml-cpp target missing for Hailo Apps ResourcesManager")
-endif()
 
 juce_add_gui_app(SurgeMidiToOscBridge
     PRODUCT_NAME "SurgeMidiToOscBridge"
@@ -52,8 +33,7 @@ juce_add_gui_app(SurgeMidiToOscBridge
 juce_generate_juce_header(SurgeMidiToOscBridge)
 
 target_sources(SurgeMidiToOscBridge PRIVATE
-    Source/Main.cpp
-    ${HAILO_APPS_CPP_DIR}/common/resources_manager.cpp)
+    Source/Main.cpp)
 
 # Embedded VAD model.
 # The embedding script is invoked by CMake at build time via add_custom_command,
@@ -88,16 +68,11 @@ else()
     message(STATUS "SurgeMidiToOscBridge: no silero VAD model — run tools/prepare-bridge-resources.sh, then reconfigure")
 endif()
 
-set_source_files_properties(${HAILO_APPS_CPP_DIR}/common/resources_manager.cpp PROPERTIES
-    COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wno-error=deprecated-declarations;-Wno-error=unused-variable;-Wno-error=unused-function;-Wno-error=sign-conversion>")
 
 target_compile_definitions(SurgeMidiToOscBridge PRIVATE
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     SURGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-
-target_include_directories(SurgeMidiToOscBridge PRIVATE
-    ${HAILO_APPS_CPP_DIR}/common)
 
 target_compile_options(SurgeMidiToOscBridge PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wno-error=shadow>)
@@ -108,7 +83,6 @@ target_link_libraries(SurgeMidiToOscBridge PRIVATE
     juce::juce_osc
     whisper
     HailoRT::libhailort
-    ${HAILO_APPS_YAMLCPP_TARGET}
     CURL::libcurl
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags

@@ -51,7 +51,7 @@ echo "CMake will embed this into the binary automatically at build time."
 if [ "$SKIP_WHISPER" -eq 0 ]; then
     echo ""
     echo "--- Whisper models (CPU/GPU backend) ---"
-    for model in tiny base; do
+    for model in tiny base small; do
         MODEL_FILE="$MODELS_DIR/ggml-${model}.bin"
         if [ ! -f "$MODEL_FILE" ]; then
             echo "Downloading ggml-${model}..."
@@ -66,6 +66,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Hailo HEF models — for NPU inference on hailo10h
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Hailo HEF models (Hailo-10H NPU backend) ---"
+HAILO_MODELS_DIR="$REPO_ROOT/extras/SurgeMidiToOscBridge/Resources/models/hailo10h"
+mkdir -p "$HAILO_MODELS_DIR"
+HAILO_HEF_BASE_URL="https://dev-public.hailo.ai/v5.3.0/blob"
+
+for model in Tiny Base Small; do
+    HEF_FILE="$HAILO_MODELS_DIR/Whisper-${model}.hef"
+    if [ ! -f "$HEF_FILE" ]; then
+        echo "Downloading Whisper-${model}.hef..."
+        curl -fL "${HAILO_HEF_BASE_URL}/Whisper-${model}.hef" -o "$HEF_FILE"
+    else
+        echo "Already present: $HEF_FILE"
+    fi
+done
+
+echo ""
+echo "Deploy HEFs to target:"
+echo "  scp $HAILO_MODELS_DIR/*.hef <user>@<target>:~/bridge/models/hailo10h/"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
@@ -77,12 +100,23 @@ ls -lh "$VAD_MODEL" 2>/dev/null | awk '{print "  " $5, $9}' \
 echo "  Reconfigure to trigger embedding: cmake --preset linux-aarch64-ubuntu-midi-osc-bridge"
 
 echo ""
-echo "Whisper models available for deployment (copy to models/ next to binary):"
-for model in tiny base; do
+echo "Whisper CPU/GPU models available for deployment (copy to models/ next to binary):"
+for model in tiny base small; do
     FILE="$MODELS_DIR/ggml-${model}.bin"
     if [ -f "$FILE" ]; then
         echo "  $(ls -lh "$FILE" | awk '{print $5, $9}')"
     else
         echo "  ggml-${model}.bin  [not downloaded]"
+    fi
+done
+
+echo ""
+echo "Hailo HEF models available for deployment (scp to ~/bridge/models/hailo10h/ on target):"
+for model in Tiny Base Small; do
+    FILE="$HAILO_MODELS_DIR/Whisper-${model}.hef"
+    if [ -f "$FILE" ]; then
+        echo "  $(ls -lh "$FILE" | awk '{print $5, $9}')"
+    else
+        echo "  Whisper-${model}.hef  [not downloaded]"
     fi
 done

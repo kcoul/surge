@@ -989,6 +989,14 @@ private:
         {
             try
             {
+                // hailo_apps defaults to /usr/local/hailo which requires root. Point it at a
+                // user-writable path instead; honour HAILO_RESOURCES_DIR if already set.
+                const auto hailoResDir = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                             .getChildFile ("bridge/hailo-resources")
+                                             .getFullPathName()
+                                             .toStdString();
+                ::setenv ("HAILO_RESOURCES_DIR", hailoResDir.c_str(), 0);
+
                 hailo_apps::ResourcesManager resources { std::filesystem::path (
                     getOrCreateResourcesConfigFile().getFullPathName().toStdString()) };
                 const auto hefPath = resources.resolve_net_arg (hailoWhisperAppName, {});

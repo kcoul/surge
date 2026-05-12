@@ -22,8 +22,30 @@ if(NOT TARGET whisper)
                      EXCLUDE_FROM_ALL)
 endif()
 
-find_package(HailoRT REQUIRED)
-find_package(CURL REQUIRED)
+set(BRIDGE_TARGET_SUPPORTS_HAILO FALSE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "QNX")
+    set(BRIDGE_TARGET_SUPPORTS_HAILO TRUE)
+endif()
+
+option(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO
+       "Enable the HailoRT Voice Command API backend for SurgeMidiToOscBridge"
+       ${BRIDGE_TARGET_SUPPORTS_HAILO})
+
+if(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO AND NOT BRIDGE_TARGET_SUPPORTS_HAILO)
+    message(STATUS "SurgeMidiToOscBridge: HailoRT disabled for ${CMAKE_SYSTEM_NAME}; only Linux and QNX targets are supported")
+    set(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO OFF CACHE BOOL
+        "Enable the HailoRT Voice Command API backend for SurgeMidiToOscBridge"
+        FORCE)
+endif()
+
+set(BRIDGE_HAS_HAILO 0)
+if(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO)
+    find_package(HailoRT REQUIRED)
+    set(BRIDGE_HAS_HAILO 1)
+else()
+    message(STATUS "SurgeMidiToOscBridge: building without HailoRT backend")
+endif()
+# find_package(CURL REQUIRED)
 
 
 juce_add_gui_app(SurgeMidiToOscBridge
@@ -70,9 +92,15 @@ endif()
 
 
 target_compile_definitions(SurgeMidiToOscBridge PRIVATE
-    JUCE_USE_CURL=0
+    BRIDGE_HAS_HAILO=${BRIDGE_HAS_HAILO}
+    JUCE_USE_CURL=1
     JUCE_WEB_BROWSER=0
     SURGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_compile_definitions(SurgeMidiToOscBridge PRIVATE
+    NOMINMAX=1)
+endif()
 
 target_compile_options(SurgeMidiToOscBridge PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wno-error=shadow>)
@@ -82,8 +110,11 @@ target_link_libraries(SurgeMidiToOscBridge PRIVATE
     juce::juce_gui_extra
     juce::juce_osc
     whisper
-    HailoRT::libhailort
-    CURL::libcurl
+    #CURL::libcurl
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
+
+if(BRIDGE_HAS_HAILO)
+    target_link_libraries(SurgeMidiToOscBridge PRIVATE HailoRT::libhailort)
+endif()

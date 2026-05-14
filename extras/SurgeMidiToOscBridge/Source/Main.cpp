@@ -833,10 +833,10 @@ private:
         audioDeviceManager.addAudioCallback (this);
         voiceWorker = std::thread ([this,
                                     backend,
-                                    modelPath = modelPath.toStdString(),
-                                    voiceVadModelPath = voiceVadModelPath.toStdString(),
+                                    modelPathStr = modelPath.toStdString(),
+                                    voiceVadModelPathStr = voiceVadModelPath.toStdString(),
                                     hailoHefName = selectedHailoHefName()] {
-            voiceWorkerLoop (backend, modelPath, voiceVadModelPath, hailoHefName);
+            voiceWorkerLoop (backend, modelPathStr, voiceVadModelPathStr, hailoHefName);
         });
 
         voiceToggleButton.setButtonText ("Stop Voice");
@@ -1249,10 +1249,10 @@ private:
 
     void appendTranscriptLine (juce::String line)
     {
-        juce::MessageManager::callAsync ([this, line = std::move (line)] {
+        juce::MessageManager::callAsync ([this, transcriptLine = std::move (line)] {
             const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
             transcriptBox.moveCaretToEnd();
-            transcriptBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
+            transcriptBox.insertTextAtCaret ("[" + timestamp + "] " + transcriptLine + "\n");
         });
     }
 
@@ -1551,9 +1551,9 @@ private:
 
     void clickPatchNavigationButtonAsync (juce::Button& button, juce::String sourceDescription)
     {
-        juce::MessageManager::callAsync ([this, &button, sourceDescription = std::move (sourceDescription)]
+        juce::MessageManager::callAsync ([this, &button, sourceDescriptionText = std::move (sourceDescription)]
         {
-            appendLog ("MIDI " + sourceDescription + " -> virtual click: " + button.getButtonText());
+            appendLog ("MIDI " + sourceDescriptionText + " -> virtual click: " + button.getButtonText());
             button.triggerClick();
         });
     }
@@ -1679,9 +1679,9 @@ private:
 
     void appendLogAsync (juce::String line)
     {
-        juce::MessageManager::callAsync ([this, line = std::move (line)]
+        juce::MessageManager::callAsync ([this, logLine = std::move (line)]
         {
-            appendLog (line);
+            appendLog (logLine);
         });
     }
 

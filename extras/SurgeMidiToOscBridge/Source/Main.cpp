@@ -1,9 +1,18 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
+#ifndef BRIDGE_HAS_HAILO
+#define BRIDGE_HAS_HAILO 0
+#endif
+#if BRIDGE_HAS_HAILO
 #include <hailo/genai/speech2text/speech2text.hpp>
 #include <hailo/hailort.hpp>
+#endif
 #include <whisper.h>
+
+#ifndef BRIDGE_HAS_EMBEDDED_VAD
+#define BRIDGE_HAS_EMBEDDED_VAD 0
+#endif
 
 #if BRIDGE_HAS_EMBEDDED_VAD
 #include "embedded_vad_model.h"
@@ -54,6 +63,7 @@ static bool embeddedBufferEof (void* ctx)
 static void embeddedBufferClose (void*) {}
 #endif
 
+#if BRIDGE_HAS_HAILO
 // Locate a Whisper HEF without relying on hailo_apps ResourcesManager.
 // Search order: models/hailo10h/ next to the binary, ~/bridge/models/hailo10h/,
 // then ~/bridge/ directly. Throws with a clear message if not found.
@@ -77,6 +87,7 @@ static std::string findHailoWhisperHef (const std::string& hefFilename)
         "Hailo Whisper HEF not found: " + hefFilename +
         ". Place it in ~/bridge/ or next to the binary in models/hailo10h/");
 }
+#endif
 
 constexpr int defaultOscPort = 53280;
 constexpr int defaultEncoderStep = 8;
@@ -92,7 +103,9 @@ constexpr auto tinyModelPath  = "libs/whisper.cpp/models/ggml-tiny.bin";
 constexpr auto baseModelPath  = "libs/whisper.cpp/models/ggml-base.bin";
 constexpr auto smallModelPath = "libs/whisper.cpp/models/ggml-small.bin";
 constexpr auto vadModelPath = "libs/whisper.cpp/models/ggml-silero-v6.2.0.bin";
+#if BRIDGE_HAS_HAILO
 constexpr auto hailoVDeviceGroupId = "SHARED";
+#endif
 
 #ifndef SURGE_SOURCE_DIR
 #define SURGE_SOURCE_DIR "."
@@ -289,6 +302,15 @@ const char* voiceBackendTranscriptId (VoiceTranscriptionBackend backend)
     return "unknown";
 }
 
+VoiceTranscriptionBackend defaultVoiceBackend()
+{
+#if BRIDGE_HAS_HAILO
+    return VoiceTranscriptionBackend::hailoNpu;
+#else
+    return VoiceTranscriptionBackend::whisperCpu;
+#endif
+}
+
 VoiceTranscriptionBackend voiceBackendFromId (int id)
 {
     switch (id)
@@ -298,8 +320,13 @@ VoiceTranscriptionBackend voiceBackendFromId (int id)
     case static_cast<int> (VoiceTranscriptionBackend::whisperGpu):
         return VoiceTranscriptionBackend::whisperGpu;
     case static_cast<int> (VoiceTranscriptionBackend::hailoNpu):
-    default:
+#if BRIDGE_HAS_HAILO
         return VoiceTranscriptionBackend::hailoNpu;
+#else
+        return defaultVoiceBackend();
+#endif
+    default:
+        return defaultVoiceBackend();
     }
 }
 
@@ -338,6 +365,7 @@ void whisperBridgeLogCallback (enum ggml_log_level level, const char* text, void
     std::fflush (stderr);
 }
 
+#if BRIDGE_HAS_HAILO
 std::shared_ptr<hailort::VDevice> createSharedHailoVDevice()
 {
     hailo_vdevice_params_t params {};
@@ -353,6 +381,7 @@ std::shared_ptr<hailort::VDevice> createSharedHailoVDevice()
 
     return vdevice.release();
 }
+#endif
 }
 
 class MainComponent final : public juce::Component,
@@ -469,11 +498,15 @@ public:
                                  static_cast<int> (VoiceTranscriptionBackend::whisperCpu));
         voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::whisperGpu),
                                  static_cast<int> (VoiceTranscriptionBackend::whisperGpu));
+#if BRIDGE_HAS_HAILO
         voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::hailoNpu),
                                  static_cast<int> (VoiceTranscriptionBackend::hailoNpu));
-        voiceBackendBox.setSelectedId (
+#endif
+        const auto savedBackend = voiceBackendFromId (
             settingsFile.getIntValue ("voiceBackend",
-                                      static_cast<int> (VoiceTranscriptionBackend::hailoNpu)),
+                                      static_cast<int> (defaultVoiceBackend())));
+        voiceBackendBox.setSelectedId (
+            static_cast<int> (savedBackend),
             juce::dontSendNotification);
         voiceBackendBox.onChange = [this] { saveSettings(); };
         addAndMakeVisible (voiceBackendBox);
@@ -800,10 +833,10 @@ private:
         audioDeviceManager.addAudioCallback (this);
         voiceWorker = std::thread ([this,
                                     backend,
-                                    modelPath = modelPath.toStdString(),
-                                    voiceVadModelPath = voiceVadModelPath.toStdString(),
+                                    modelPathStr = modelPath.toStdString(),
+                                    voiceVadModelPathStr = voiceVadModelPath.toStdString(),
                                     hailoHefName = selectedHailoHefName()] {
-            voiceWorkerLoop (backend, modelPath, voiceVadModelPath, hailoHefName);
+            voiceWorkerLoop (backend, modelPathStr, voiceVadModelPathStr, hailoHefName);
         });
 
         voiceToggleButton.setButtonText ("Stop Voice");
@@ -930,7 +963,7 @@ private:
     void voiceWorkerLoop (VoiceTranscriptionBackend backend,
                           const std::string& modelPath,
                           const std::string& voiceVadModelPath,
-                          const std::string& hailoHefName)
+                          [[maybe_unused]] const std::string& hailoHefName)
     {
         auto vadContextParams = whisper_vad_default_context_params();
         vadContextParams.n_threads = juce::jlimit (1, 4,
@@ -964,8 +997,10 @@ private:
 
         std::unique_ptr<whisper_context, decltype (&whisper_free)> whisperCtx (nullptr,
                                                                                whisper_free);
+#if BRIDGE_HAS_HAILO
         std::shared_ptr<hailort::VDevice> hailoVDevice;
         std::unique_ptr<hailort::genai::Speech2Text> speech2Text;
+#endif
 
         if (isWhisperCppBackend (backend))
         {
@@ -988,6 +1023,7 @@ private:
         }
         else
         {
+#if BRIDGE_HAS_HAILO
             try
             {
                 const auto hefPath = findHailoWhisperHef (hailoHefName);
@@ -1015,6 +1051,14 @@ private:
                 });
                 return;
             }
+#else
+            juce::MessageManager::callAsync ([this] {
+                appendLog ("Voice recognition failed: Hailo NPU backend is not available in this build");
+                stopVoiceRecognition();
+                voiceStatusLabel.setText ("Backend unavailable", juce::dontSendNotification);
+            });
+            return;
+#endif
         }
 
         {
@@ -1144,8 +1188,13 @@ private:
             {
                 if (isWhisperCppBackend (backend))
                     text = transcribeVoiceChunk (whisperCtx.get(), utterance);
+#if BRIDGE_HAS_HAILO
                 else
                     text = transcribeVoiceChunk (*speech2Text, utterance);
+#else
+                else
+                    throw std::runtime_error ("Hailo NPU backend is not available in this build");
+#endif
             }
             catch (const std::exception& exception)
             {
@@ -1200,13 +1249,14 @@ private:
 
     void appendTranscriptLine (juce::String line)
     {
-        juce::MessageManager::callAsync ([this, line = std::move (line)] {
+        juce::MessageManager::callAsync ([this, transcriptLine = std::move (line)] {
             const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
             transcriptBox.moveCaretToEnd();
-            transcriptBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
+            transcriptBox.insertTextAtCaret ("[" + timestamp + "] " + transcriptLine + "\n");
         });
     }
 
+#if BRIDGE_HAS_HAILO
     juce::String transcribeVoiceChunk (hailort::genai::Speech2Text& speech2Text,
                                        const std::vector<float>& samples)
     {
@@ -1233,6 +1283,7 @@ private:
 
         return juce::String (text).trim();
     }
+#endif
 
     juce::String transcribeVoiceChunk (whisper_context* ctx, const std::vector<float>& samples)
     {
@@ -1500,9 +1551,9 @@ private:
 
     void clickPatchNavigationButtonAsync (juce::Button& button, juce::String sourceDescription)
     {
-        juce::MessageManager::callAsync ([this, &button, sourceDescription = std::move (sourceDescription)]
+        juce::MessageManager::callAsync ([this, &button, sourceDescriptionText = std::move (sourceDescription)]
         {
-            appendLog ("MIDI " + sourceDescription + " -> virtual click: " + button.getButtonText());
+            appendLog ("MIDI " + sourceDescriptionText + " -> virtual click: " + button.getButtonText());
             button.triggerClick();
         });
     }
@@ -1628,9 +1679,9 @@ private:
 
     void appendLogAsync (juce::String line)
     {
-        juce::MessageManager::callAsync ([this, line = std::move (line)]
+        juce::MessageManager::callAsync ([this, logLine = std::move (line)]
         {
-            appendLog (line);
+            appendLog (logLine);
         });
     }
 

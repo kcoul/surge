@@ -2,13 +2,13 @@
 project(surge-xt VERSION ${CMAKE_PROJECT_VERSION})
 
 file(GLOB SURGE_XT_JUCE_RESOURCES_GLOB
-  ${CMAKE_SOURCE_DIR}/resources/classic-skin-svgs/*.svg
-  ${CMAKE_SOURCE_DIR}/resources/fonts/Lato*ttf
-  ${CMAKE_SOURCE_DIR}/resources/fonts/IndieFlower.ttf
-  ${CMAKE_SOURCE_DIR}/resources/fonts/FiraMono-Regular.ttf
-  ${CMAKE_SOURCE_DIR}/resources/surge-xt/memory-skin.xml
-  ${CMAKE_SOURCE_DIR}/resources/surge-xt/wtfile_icon.svg
-  ${CMAKE_SOURCE_DIR}/resources/surge-xt/wtscript_icon.svg
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/classic-skin-svgs/*.svg
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/fonts/Lato*ttf
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/fonts/IndieFlower.ttf
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/fonts/FiraMono-Regular.ttf
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/surge-xt/memory-skin.xml
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/surge-xt/wtfile_icon.svg
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/surge-xt/wtscript_icon.svg
 )
 
 juce_add_binary_data(surge-xt-binary
@@ -36,7 +36,7 @@ juce_add_plugin(${PROJECT_NAME}
   PLUGIN_MANUFACTURER_CODE VmbA
   PLUGIN_CODE SgXT
 
-  ICON_BIG "${CMAKE_SOURCE_DIR}/resources/surge-xt/SurgeLogo.png"
+  ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/surge-xt/SurgeLogo.png"
 
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE

@@ -39,6 +39,24 @@
       }
     },
     {
+      "name": "host-midi-osc-bridge-hailo",
+      "displayName": "Host MIDI to OSC bridge (Hailo NPU)",
+      "inherits": [
+        "host-midi-osc-bridge-common"
+      ],
+      "binaryDir": "${sourceDir}/extras/SurgeMidiToOscBridge/build-hailo",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "C:/ninja-win/ninja.exe",
+        "SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO": "ON"
+      }
+    },
+    {
       "name": "qnx-surge",
       "displayName": "QNX Surge XT",
       "inherits": [
@@ -91,6 +109,23 @@
         "common"
       ],
       "configurePreset": "host-midi-osc-bridge",
+      "targets": [
+        "SurgeMidiToOscBridge"
+      ],
+      "jobs": 4,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "build-host-midi-osc-bridge-hailo",
+      "displayName": "Build host MIDI to OSC bridge (Hailo NPU)",
+      "inherits": [
+        "common"
+      ],
+      "configurePreset": "host-midi-osc-bridge-hailo",
       "targets": [
         "SurgeMidiToOscBridge"
       ],

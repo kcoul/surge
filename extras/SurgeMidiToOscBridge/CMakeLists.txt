@@ -23,7 +23,7 @@ if(NOT TARGET whisper)
 endif()
 
 set(BRIDGE_TARGET_SUPPORTS_HAILO FALSE)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "QNX")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "QNX" OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(BRIDGE_TARGET_SUPPORTS_HAILO TRUE)
 endif()
 
@@ -32,7 +32,7 @@ option(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO
        ${BRIDGE_TARGET_SUPPORTS_HAILO})
 
 if(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO AND NOT BRIDGE_TARGET_SUPPORTS_HAILO)
-    message(STATUS "SurgeMidiToOscBridge: HailoRT disabled for ${CMAKE_SYSTEM_NAME}; only Linux and QNX targets are supported")
+    message(STATUS "SurgeMidiToOscBridge: HailoRT disabled for ${CMAKE_SYSTEM_NAME}; supported on Linux, QNX, and Windows only")
     set(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO OFF CACHE BOOL
         "Enable the HailoRT Voice Command API backend for SurgeMidiToOscBridge"
         FORCE)

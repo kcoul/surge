@@ -5,8 +5,26 @@
 #define BRIDGE_HAS_HAILO 0
 #endif
 #if BRIDGE_HAS_HAILO
+// Windows COM headers (included transitively via HailoRT's platform.h →
+// winsock2.h → basetyps.h) define `interface` as `struct`.  This conflicts
+// with HailoRT's use of `interface` as a parameter name in hailort_defaults.hpp.
+//
+// Workaround: pre-define the hailort_defaults.hpp include guard so that
+// hailort.hpp skips it on its own inclusion pass.  After hailort.hpp is done
+// (and Windows headers are now processed), undefine both the fake guard and
+// the COM macro, then include hailort_defaults.hpp ourselves in a clean state.
+//
+// This avoids modifying the installed SDK headers.
+#ifdef _WIN32
+#  define _HAILO_HAILORT_DEFAULTS_HPP_   // suppress inclusion by hailort.hpp
+#endif
 #include <hailo/genai/speech2text/speech2text.hpp>
 #include <hailo/hailort.hpp>
+#ifdef _WIN32
+#  undef _HAILO_HAILORT_DEFAULTS_HPP_    // allow our explicit inclusion below
+#  undef interface                        // remove COM's `#define interface struct`
+#  include <hailo/hailort_defaults.hpp>  // now parses cleanly
+#endif
 #endif
 #include <whisper.h>
 

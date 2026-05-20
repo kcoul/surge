@@ -513,6 +513,10 @@ public:
         };
         addAndMakeVisible (randomPatchButton);
 
+        randomParamsButton.setButtonText ("Randomize");
+        randomParamsButton.onClick = [this] { randomizeAllParams(); };
+        addAndMakeVisible (randomParamsButton);
+
         voiceLabel.setText ("Voice", juce::dontSendNotification);
         addAndMakeVisible (voiceLabel);
 
@@ -570,10 +574,6 @@ public:
         voiceRecognizedBox.setText ("", juce::dontSendNotification);
         addAndMakeVisible (voiceRecognizedBox);
 
-        schemaLabel.setText ("Forwarded OSC: /mnote, patch navigation buttons, CC12-19/22-29 -> /param/a/...",
-                             juce::dontSendNotification);
-        addAndMakeVisible (schemaLabel);
-
         statusLabel.setText ("Disconnected", juce::dontSendNotification);
         statusLabel.setColour (juce::Label::textColourId, juce::Colours::darkred);
         addAndMakeVisible (statusLabel);
@@ -587,21 +587,6 @@ public:
         midiInputsBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
         midiInputsBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
         addAndMakeVisible (midiInputsBox);
-
-        controllerMappingsLabel.setText ("Controller mappings", juce::dontSendNotification);
-        addAndMakeVisible (controllerMappingsLabel);
-
-        controllerMappingsBox.setMultiLine (true);
-        controllerMappingsBox.setReadOnly (true);
-        controllerMappingsBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
-        controllerMappingsBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
-        controllerMappingsBox.setColour (juce::TextEditor::outlineColourId,
-                                         juce::Colour::fromRGB (88, 102, 114));
-        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
-        addAndMakeVisible (controllerMappingsBox);
-
-        logLabel.setText ("Event log", juce::dontSendNotification);
-        addAndMakeVisible (logLabel);
 
         logBox.setMultiLine (true);
         logBox.setReadOnly (true);
@@ -620,9 +605,18 @@ public:
         transcriptBox.setColour (juce::TextEditor::outlineColourId,
                                  juce::Colour::fromRGB (88, 102, 114));
 
-        logTabs.addTab ("Event Log",  juce::Colour::fromRGB (31, 48, 61), &logBox,          false);
-        logTabs.addTab ("Transcript", juce::Colour::fromRGB (31, 48, 61), &transcriptBox,   false);
-        logTabs.addTab ("MIDI Learn", juce::Colour::fromRGB (31, 48, 61), &midiLearnPanel,  false);
+        debugLogBox.setMultiLine (true);
+        debugLogBox.setReadOnly (true);
+        debugLogBox.setScrollbarsShown (true);
+        debugLogBox.setCaretVisible (false);
+        debugLogBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        debugLogBox.setColour (juce::TextEditor::textColourId, juce::Colour::fromRGB (180, 220, 140));
+        debugLogBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
+
+        logTabs.addTab ("Debug Log",      juce::Colour::fromRGB (31, 48, 61), &debugLogBox,    false);
+        logTabs.addTab ("MIDI Event Log", juce::Colour::fromRGB (31, 48, 61), &logBox,         false);
+        logTabs.addTab ("MIDI Learn",     juce::Colour::fromRGB (31, 48, 61), &midiLearnPanel, false);
+        logTabs.addTab ("Transcript",     juce::Colour::fromRGB (31, 48, 61), &transcriptBox,  false);
         addAndMakeVisible (logTabs);
 
         // Wire up MIDI Learn panel callbacks
@@ -739,6 +733,8 @@ public:
         nextProgramButton.setBounds (patchNavRow.removeFromLeft (104));
         patchNavRow.removeFromLeft (12);
         randomPatchButton.setBounds (patchNavRow.removeFromLeft (116));
+        patchNavRow.removeFromLeft (12);
+        randomParamsButton.setBounds (patchNavRow.removeFromLeft (100));
 
         area.removeFromTop (8);
         auto voiceRow = area.removeFromTop (30);
@@ -754,19 +750,12 @@ public:
         voiceRecognizedBox.setBounds (voiceRow);
 
         area.removeFromTop (8);
-        schemaLabel.setBounds (area.removeFromTop (24));
-        area.removeFromTop (6);
         statusLabel.setBounds (area.removeFromTop (24));
         area.removeFromTop (12);
 
         midiInputsLabel.setBounds (area.removeFromTop (24));
         midiInputsBox.setBounds (area.removeFromTop (88));
         area.removeFromTop (12);
-        controllerMappingsLabel.setBounds (area.removeFromTop (24));
-        controllerMappingsBox.setBounds (area.removeFromTop (154));
-        area.removeFromTop (14);
-        logLabel.setBounds (area.removeFromTop (24));
-        area.removeFromTop (6);
         logTabs.setBounds (area);
     }
 
@@ -806,7 +795,7 @@ private:
                 appendLog ("OSC receiver listening on port "
                            + juce::String (defaultSurgeOscOutPort));
                 sendOscMessage (juce::OSCMessage ("/q/all_params"));
-                appendLog ("Sent /q/all_params — discovering parameters...");
+                appendLog ("Sent /q/all_params - discovering parameters...");
             }
             else
             {
@@ -962,7 +951,7 @@ private:
     // path baked in at build time (development builds running from the build tree).
     juce::File resolveModelFile (const char* repoRelativePath) const
     {
-        const auto modelName = juce::File (repoRelativePath).getFileName();
+        const auto modelName = juce::File (SURGE_SOURCE_DIR).getChildFile (repoRelativePath).getFileName();
         const auto nextToBinary = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
                                       .getParentDirectory()
                                       .getChildFile ("models")
@@ -1486,7 +1475,7 @@ private:
                                          message.getControllerValue()))
                 return;
 
-            handleControllerMessage (deviceName, message.getControllerNumber(),
+            handleControllerMessage (message.getControllerNumber(),
                                      message.getControllerValue());
         }
         else if (message.isProgramChange())
@@ -1502,10 +1491,10 @@ private:
                 const juce::ScopedLock lock (activeNotesLock);
                 activeNotes.insert (noteNumber);
             }
-            appendLogAsync ("MIDI noteOn from " + deviceName
-                            + ": " + getNoteName (noteNumber)
-                            + " (" + juce::String (noteNumber) + ")"
-                            + " velocity=" + juce::String (velocity));
+            appendMidiLogAsync ("MIDI noteOn from " + deviceName
+                               + ": " + getNoteName (noteNumber)
+                               + " (" + juce::String (noteNumber) + ")"
+                               + " velocity=" + juce::String (velocity));
         }
         else
         {
@@ -1515,13 +1504,13 @@ private:
                 const juce::ScopedLock lock (activeNotesLock);
                 activeNotes.erase (noteNumber);
             }
-            appendLogAsync ("MIDI noteOff from " + deviceName
-                            + ": " + getNoteName (noteNumber)
-                            + " (" + juce::String (noteNumber) + ")");
+            appendMidiLogAsync ("MIDI noteOff from " + deviceName
+                               + ": " + getNoteName (noteNumber)
+                               + " (" + juce::String (noteNumber) + ")");
         }
     }
 
-    void handleControllerMessage (const juce::String& deviceName, int controllerNumber, int controllerValue)
+    void handleControllerMessage (int controllerNumber, int controllerValue)
     {
         // ── MIDI Learn: capture mode ─────────────────────────────────────────
         // learningRow is atomic; store -1 immediately so a second CC doesn't
@@ -1592,56 +1581,13 @@ private:
             if (learnedAddress.isNotEmpty())
             {
                 sendOscMessage (juce::OSCMessage (learnedAddress, oscValue));
-                appendLogAsync ("CC" + juce::String (controllerNumber)
-                                + " (learned) -> " + learnedAddress
-                                + " = " + juce::String (oscValue, 3));
+                appendMidiLogAsync ("CC" + juce::String (controllerNumber)
+                                   + " (learned) -> " + learnedAddress
+                                   + " = " + juce::String (oscValue, 3));
                 return;
             }
         }
 
-        // ── Fixed CC mappings (existing behaviour) ───────────────────────────
-        ControllerMapping mappingToSend {};
-        float oscValue = 0.0f;
-
-        {
-            const juce::ScopedLock lock (controllerMappingsLock);
-
-            auto* mapping = findControllerMapping (controllerNumber);
-            if (mapping == nullptr)
-                return;
-
-            oscValue = controllerValue / 127.0f;
-
-            if (mapping->mode == ControllerMode::relative)
-            {
-                if (encoderMode == EncoderMode::absolute)
-                {
-                    oscValue = controllerValue / 127.0f;
-                }
-                else
-                {
-                    auto delta = relativeControllerDelta (controllerValue, encoderMode);
-                    if (! delta.has_value())
-                        return;
-
-                    oscValue = juce::jlimit (0.0f, 1.0f,
-                                             mapping->currentValue
-                                                 + ((*delta * encoderStep) / 127.0f));
-                }
-            }
-
-            mapping->currentValue = oscValue;
-            mappingToSend = *mapping;
-        }
-
-        sendSurgeParameterMessage (mappingToSend, oscValue);
-
-        appendLogAsync ("MIDI CC" + juce::String (controllerNumber)
-                        + " from " + deviceName
-                        + " -> " + juce::String (mappingToSend.oscAddress)
-                        + " raw=" + juce::String (controllerValue)
-                        + " step=" + juce::String (encoderStep)
-                        + " value=" + juce::String (oscValue, 3));
     }
 
     bool handleBankSelectMessage (const juce::String& deviceName, int controllerNumber,
@@ -1654,7 +1600,7 @@ private:
         int currentBank = 0;
 
         {
-            const juce::ScopedLock lock (controllerMappingsLock);
+            const juce::ScopedLock lock (stateLock);
 
             if (controllerNumber == 0)
                 bankSelectMsb = controllerValue;
@@ -1670,9 +1616,9 @@ private:
 
         if (! previousBank.has_value())
         {
-            appendLogAsync ("MIDI " + juce::String (controllerName)
-                            + " from " + deviceName
-                            + ": baseline bank=" + juce::String (currentBank));
+            appendMidiLogAsync ("MIDI " + juce::String (controllerName)
+                               + " from " + deviceName
+                               + ": baseline bank=" + juce::String (currentBank));
             return true;
         }
 
@@ -1693,15 +1639,15 @@ private:
         std::optional<int> previousProgram;
 
         {
-            const juce::ScopedLock lock (controllerMappingsLock);
+            const juce::ScopedLock lock (stateLock);
             previousProgram = lastProgramChange;
             lastProgramChange = programNumber;
         }
 
         if (! previousProgram.has_value())
         {
-            appendLogAsync ("MIDI Program Change from " + deviceName
-                            + ": baseline program=" + juce::String (programNumber));
+            appendMidiLogAsync ("MIDI Program Change from " + deviceName
+                               + ": baseline program=" + juce::String (programNumber));
             return;
         }
 
@@ -1725,23 +1671,9 @@ private:
         });
     }
 
-    ControllerMapping* findControllerMapping (int controllerNumber)
-    {
-        for (auto& mapping : controllerMappings)
-            if (mapping.controllerNumber == controllerNumber)
-                return &mapping;
-
-        return nullptr;
-    }
-
     void sendSurgeNoteMessage (int noteNumber, int velocity)
     {
         sendOscMessage (juce::OSCMessage ("/mnote", (float) noteNumber, (float) velocity));
-    }
-
-    void sendSurgeParameterMessage (const ControllerMapping& mapping, float normalizedValue)
-    {
-        sendOscMessage (juce::OSCMessage (mapping.oscAddress, normalizedValue));
     }
 
     void triggerPatchNavigationAction (const char* actionName, const char* oscAddress)
@@ -1749,6 +1681,80 @@ private:
         sendOscMessage (juce::OSCMessage (oscAddress));
         appendLog ("Patch navigation: " + juce::String (actionName)
                    + " -> " + juce::String (oscAddress));
+    }
+
+    void randomizeAllParams()
+    {
+        juce::StringArray addresses;
+        {
+            const juce::ScopedLock lock (midiLearnLock);
+            addresses = discoveredParamAddresses;
+        }
+
+        if (addresses.isEmpty())
+        {
+            appendLog ("No parameters discovered — use Query in MIDI Learn tab first");
+            return;
+        }
+
+        // Params to leave at their current value (no universally correct target).
+        static const juce::StringArray skipSuffixes {
+            "pan",
+            "volume",
+        };
+
+        // Params that must be actively reset to a fixed value every randomize.
+        // "skip" would leave them stuck if they were ever randomized to a bad value.
+        static const std::initializer_list<std::pair<const char*, float>> resetSuffixes {
+            { "keytrack", 1.0f },  // off = all keys same pitch
+            { "mute",     0.0f },  // muted oscillator = silence
+            { "solo",     0.0f },  // soloed oscillator silences others
+        };
+
+        // Params that are safe to randomize but need a bounded range to avoid
+        // clipping (ceiling) or inaudibility (floor). {suffix, min, max}.
+        static const std::initializer_list<std::tuple<const char*, float, float>> clampedSuffixes {
+            { "resonance",      0.0f, 0.70f },  // above ~0.7 risks self-oscillation
+            { "drive",          0.0f, 0.40f },  // waveshaper drive clips hard at high values
+            { "prefilter_gain", 0.0f, 0.50f },  // pre-filter boost drives everything into clipping
+            { "fm_depth",       0.0f, 0.30f },  // high FM depth causes huge amplitude spikes
+            { "level",          0.3f, 1.00f },  // send/aux levels — floor keeps patch audible
+        };
+
+        juce::Random rng;
+        int skipped = 0, reset = 0, clamped = 0;
+        for (const auto& addr : addresses)
+        {
+            const auto leaf = addr.fromLastOccurrenceOf ("/", false, false);
+            if (skipSuffixes.contains (leaf)) { ++skipped; continue; }
+
+            bool handled = false;
+            for (const auto& [suffix, value] : resetSuffixes)
+            {
+                if (leaf == suffix)
+                {
+                    sendOscMessage (juce::OSCMessage (addr, value));
+                    ++reset; handled = true; break;
+                }
+            }
+            if (! handled)
+            {
+                for (const auto& [suffix, lo, hi] : clampedSuffixes)
+                {
+                    if (leaf == suffix)
+                    {
+                        sendOscMessage (juce::OSCMessage (addr, lo + rng.nextFloat() * (hi - lo)));
+                        ++clamped; handled = true; break;
+                    }
+                }
+            }
+            if (! handled)
+                sendOscMessage (juce::OSCMessage (addr, rng.nextFloat()));
+        }
+
+        appendLog ("Randomized " + juce::String (addresses.size() - skipped - reset - clamped)
+                   + " free, " + juce::String (clamped) + " clamped, "
+                   + juce::String (reset) + " reset, " + juce::String (skipped) + " skipped");
     }
 
     void sendAllNotesOff()
@@ -1861,50 +1867,30 @@ private:
     void updateEncoderModeFromComboBox()
     {
         {
-            const juce::ScopedLock lock (controllerMappingsLock);
+            const juce::ScopedLock lock (stateLock);
             encoderMode = encoderModeFromId (encoderModeBox.getSelectedId());
         }
 
         saveSettings();
-        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
         appendLog ("Encoder mode set to " + encoderModeName (encoderMode));
     }
 
     void updateEncoderStepFromComboBox()
     {
         {
-            const juce::ScopedLock lock (controllerMappingsLock);
+            const juce::ScopedLock lock (stateLock);
             encoderStep = juce::jlimit (1, 32, encoderStepBox.getSelectedId());
         }
 
         saveSettings();
-        controllerMappingsBox.setText (getControllerMappingsDescription(), juce::dontSendNotification);
         appendLog ("Encoder step set to " + juce::String (encoderStep));
-    }
-
-    juce::String getControllerMappingsDescription() const
-    {
-        juce::StringArray lines;
-        lines.add ("Encoder mode: " + encoderModeName (encoderMode));
-        lines.add ("Encoder step: " + juce::String (encoderStep) + " MIDI counts per tick");
-        lines.add ("Patch navigation buttons: Previous Bank / Next Bank / Previous Patch / Next Patch / Surprise Me!");
-        lines.add ("");
-
-        for (const auto& mapping : controllerMappings)
-        {
-            lines.add ("CC" + juce::String (mapping.controllerNumber)
-                       + " (" + controllerModeName (mapping.mode) + ")  "
-                       + mapping.label + "  ->  " + mapping.oscAddress);
-        }
-
-        return lines.joinIntoString ("\n");
     }
 
     void appendLog (const juce::String& line)
     {
         const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
-        logBox.moveCaretToEnd();
-        logBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
+        debugLogBox.moveCaretToEnd();
+        debugLogBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
     }
 
     void appendLogAsync (juce::String line)
@@ -1912,6 +1898,21 @@ private:
         juce::MessageManager::callAsync ([this, logLine = std::move (line)]
         {
             appendLog (logLine);
+        });
+    }
+
+    void appendMidiLog (const juce::String& line)
+    {
+        const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
+        logBox.moveCaretToEnd();
+        logBox.insertTextAtCaret ("[" + timestamp + "] " + line + "\n");
+    }
+
+    void appendMidiLogAsync (juce::String line)
+    {
+        juce::MessageManager::callAsync ([this, logLine = std::move (line)]
+        {
+            appendMidiLog (logLine);
         });
     }
 
@@ -1933,27 +1934,25 @@ private:
     juce::TextButton previousProgramButton;
     juce::TextButton nextProgramButton;
     juce::TextButton randomPatchButton;
+    juce::TextButton randomParamsButton;
     juce::Label voiceLabel;
     juce::ComboBox voiceBackendBox;
     juce::ComboBox voiceModelBox;
     juce::TextButton voiceToggleButton;
     juce::Label voiceStatusLabel;
     juce::TextEditor voiceRecognizedBox;
-    juce::Label schemaLabel;
     juce::Label statusLabel;
     juce::Label midiInputsLabel;
     juce::TextEditor midiInputsBox;
-    juce::Label controllerMappingsLabel;
-    juce::TextEditor controllerMappingsBox;
-    juce::Label logLabel;
     juce::TabbedComponent logTabs { juce::TabbedButtonBar::TabsAtTop };
     juce::TextEditor logBox;
+    juce::TextEditor debugLogBox;
     juce::TextEditor transcriptBox;
     juce::PropertiesFile& settingsFile;
 
     juce::CriticalSection oscLock;
     juce::CriticalSection activeNotesLock;
-    juce::CriticalSection controllerMappingsLock;
+    juce::CriticalSection stateLock;
     juce::OSCSender oscSender;
     juce::AudioDeviceManager audioDeviceManager;
     juce::String targetHost = defaultTargetAddress;
@@ -1975,8 +1974,6 @@ private:
     juce::String lastVoiceCommandNormalized;
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     std::set<int> activeNotes;
-    std::array<ControllerMapping, 16> controllerMappings = defaultControllerMappings;
-
     // ── MIDI Learn ────────────────────────────────────────────────────────────
     // Declared in this order: discoveredParamAddresses and learnMap must be
     // constructed before midiLearnPanel (which holds references to both).

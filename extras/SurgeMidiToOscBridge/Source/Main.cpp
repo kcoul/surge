@@ -27,6 +27,7 @@
 #endif
 #endif
 #include <whisper.h>
+#include "MidiLearnMap.h"
 
 #ifndef BRIDGE_HAS_EMBEDDED_VAD
 #define BRIDGE_HAS_EMBEDDED_VAD 0
@@ -107,7 +108,8 @@ static std::string findHailoWhisperHef (const std::string& hefFilename)
 }
 #endif
 
-constexpr int defaultOscPort = 53280;
+constexpr int defaultOscPort       = 53280;  // SurgeXT OSC input port
+constexpr int defaultSurgeOscOutPort = 53281; // SurgeXT OSC output port (Bridge listens here)
 constexpr int defaultEncoderStep = 8;
 constexpr int whisperSampleRate = 16000;
 constexpr double vadFrameSeconds = 0.04;
@@ -404,7 +406,9 @@ std::shared_ptr<hailort::VDevice> createSharedHailoVDevice()
 
 class MainComponent final : public juce::Component,
                             private juce::MidiInputCallback,
-                            private juce::AudioIODeviceCallback
+                            private juce::AudioIODeviceCallback,
+                            private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>,
+                            private juce::Timer
 {
 public:
     explicit MainComponent (juce::PropertiesFile& settingsFileToUse)
@@ -616,10 +620,56 @@ public:
         transcriptBox.setColour (juce::TextEditor::outlineColourId,
                                  juce::Colour::fromRGB (88, 102, 114));
 
-        logTabs.addTab ("Event Log", juce::Colour::fromRGB (31, 48, 61), &logBox, false);
-        logTabs.addTab ("Transcript", juce::Colour::fromRGB (31, 48, 61), &transcriptBox, false);
+        logTabs.addTab ("Event Log",  juce::Colour::fromRGB (31, 48, 61), &logBox,          false);
+        logTabs.addTab ("Transcript", juce::Colour::fromRGB (31, 48, 61), &transcriptBox,   false);
+        logTabs.addTab ("MIDI Learn", juce::Colour::fromRGB (31, 48, 61), &midiLearnPanel,  false);
         addAndMakeVisible (logTabs);
 
+        // Wire up MIDI Learn panel callbacks
+        midiLearnPanel.onQueryRequested = [this]
+        {
+            {
+                const juce::ScopedLock lock (midiLearnLock);
+                discoveredParamAddresses.clear();
+            }
+            midiLearnPanel.refresh();
+            sendOscMessage (juce::OSCMessage ("/q/all_params"));
+            appendLog ("Sent /q/all_params — waiting for parameter list...");
+        };
+
+        midiLearnPanel.onLearnRequested = [this] (int row)
+        {
+            learningRow.store (row);
+            midiLearnPanel.setLearningRow (row);
+        };
+
+        midiLearnPanel.onClearRequested = [this] (int row)
+        {
+            {
+                const juce::ScopedLock lock (midiLearnLock);
+                if (row >= 0 && row < discoveredParamAddresses.size())
+                    learnMap.clear (discoveredParamAddresses.getReference (row));
+            }
+            saveMidiLearnMap();
+            midiLearnPanel.refresh();
+        };
+
+        midiLearnPanel.onModeToggleRequested = [this] (int row)
+        {
+            {
+                const juce::ScopedLock lock (midiLearnLock);
+                if (row >= 0 && row < discoveredParamAddresses.size())
+                {
+                    auto& b = learnMap.bindings[discoveredParamAddresses.getReference (row)];
+                    b.mode = (b.mode == LearnMode::absolute) ? LearnMode::relative
+                                                             : LearnMode::absolute;
+                }
+            }
+            saveMidiLearnMap();
+            midiLearnPanel.refresh();
+        };
+
+        loadMidiLearnMap();
         connectOscSender();
         refreshMidiInputs();
     }
@@ -630,6 +680,8 @@ public:
         sendAllNotesOff();
         saveSettings();
         shutdownMidiInputs();
+        oscReceiver.removeListener (this);
+        oscReceiver.disconnect();
 
         const juce::ScopedLock lock (oscLock);
         oscSender.disconnect();
@@ -742,6 +794,26 @@ private:
             setStatus ("Connected to " + targetHost + ":" + juce::String (targetPort),
                        juce::Colours::darkgreen);
             appendLog ("OSC connected to " + targetHost + ":" + juce::String (targetPort));
+
+            // Start OSC receiver so we can hear SurgeXT's /q/all_params response.
+            // SurgeXT sends replies to its configured output port (default 53281).
+            // TODO: expose this port in the UI when multi-machine setups are needed.
+            oscReceiver.removeListener (this);
+            oscReceiver.disconnect();
+            if (oscReceiver.connect (defaultSurgeOscOutPort))
+            {
+                oscReceiver.addListener (this);
+                appendLog ("OSC receiver listening on port "
+                           + juce::String (defaultSurgeOscOutPort));
+                sendOscMessage (juce::OSCMessage ("/q/all_params"));
+                appendLog ("Sent /q/all_params — discovering parameters...");
+            }
+            else
+            {
+                appendLog ("OSC receiver failed on port "
+                           + juce::String (defaultSurgeOscOutPort)
+                           + " (use Query button in MIDI Learn tab to retry)");
+            }
         }
         else
         {
@@ -1451,6 +1523,83 @@ private:
 
     void handleControllerMessage (const juce::String& deviceName, int controllerNumber, int controllerValue)
     {
+        // ── MIDI Learn: capture mode ─────────────────────────────────────────
+        // learningRow is atomic; store -1 immediately so a second CC doesn't
+        // double-fire before the async UI update below reaches the message thread.
+        const int captureRow = learningRow.exchange (-1);
+        if (captureRow >= 0)
+        {
+            juce::String address;
+            {
+                const juce::ScopedLock lock (midiLearnLock);
+                if (captureRow < discoveredParamAddresses.size())
+                    address = discoveredParamAddresses.getReference (captureRow);
+            }
+            if (address.isNotEmpty())
+            {
+                const int cc = controllerNumber;
+                {
+                    const juce::ScopedLock lock (midiLearnLock);
+                    learnMap.assign (address, 0, cc);
+                }
+                juce::MessageManager::callAsync ([this] {
+                    midiLearnPanel.setLearningRow (-1);
+                    midiLearnPanel.refresh();
+                    saveMidiLearnMap();
+                });
+                appendLogAsync ("MIDI Learn bound: CC" + juce::String (cc)
+                                + " -> " + address);
+                return;
+            }
+            // Row was out of range — cancel learn mode cleanly
+            juce::MessageManager::callAsync ([this] { midiLearnPanel.setLearningRow (-1); });
+        }
+
+        // ── MIDI Learn: live mapping ─────────────────────────────────────────
+        // Apply the same absolute/relative logic as the fixed CC mappings so that
+        // relative encoders accumulate correctly instead of jumping to fixed positions.
+        {
+            juce::String learnedAddress;
+            float        oscValue = 0.0f;
+            bool         skip     = false;
+
+            {
+                const juce::ScopedLock lock (midiLearnLock);
+                for (auto& [addr, b] : learnMap.bindings)
+                {
+                    if (b.cc != controllerNumber) continue;
+
+                    if (b.mode == LearnMode::absolute)
+                    {
+                        oscValue = controllerValue / 127.0f;
+                    }
+                    else
+                    {
+                        // Relative mode: use the global encoder decoder + step size
+                        auto delta = relativeControllerDelta (controllerValue, encoderMode);
+                        if (! delta.has_value()) { skip = true; break; }
+                        oscValue = juce::jlimit (0.0f, 1.0f,
+                                                 b.currentValue
+                                                     + ((*delta * encoderStep) / 127.0f));
+                    }
+                    b.currentValue = oscValue;
+                    learnedAddress = addr;
+                    break;
+                }
+            }
+
+            if (skip) return;
+            if (learnedAddress.isNotEmpty())
+            {
+                sendOscMessage (juce::OSCMessage (learnedAddress, oscValue));
+                appendLogAsync ("CC" + juce::String (controllerNumber)
+                                + " (learned) -> " + learnedAddress
+                                + " = " + juce::String (oscValue, 3));
+                return;
+            }
+        }
+
+        // ── Fixed CC mappings (existing behaviour) ───────────────────────────
         ControllerMapping mappingToSend {};
         float oscValue = 0.0f;
 
@@ -1629,6 +1778,69 @@ private:
         }
     }
 
+    // ── OSC receiver callback (message thread) ────────────────────────────────
+    void oscMessageReceived (const juce::OSCMessage& message) override
+    {
+        const auto addr = message.getAddressPattern().toString();
+
+        // Only collect base /param/... addresses — skip extended options and /doc/...
+        if (! addr.startsWith ("/param/")) return;
+        static const juce::StringArray extSuffixes {
+            "abs", "enable", "tempo_sync", "extend", "deform",
+            "const_rate", "gliss", "retrig", "curve"
+        };
+        if (extSuffixes.contains (addr.fromLastOccurrenceOf ("/", false, false))) return;
+
+        {
+            const juce::ScopedLock lock (midiLearnLock);
+            if (discoveredParamAddresses.contains (addr)) return;
+            discoveredParamAddresses.add (addr);
+        }
+
+        // Debounce: refresh the table 400 ms after the last new address arrives
+        paramListDirty = true;
+        startTimer (400);
+    }
+
+    // Fires on the message thread after the param-dump flood settles
+    void timerCallback() override
+    {
+        stopTimer();
+        if (! paramListDirty) return;
+        paramListDirty = false;
+        {
+            const juce::ScopedLock lock (midiLearnLock);
+            discoveredParamAddresses.sort (false);
+        }
+        midiLearnPanel.refresh();
+        appendLog ("MIDI Learn: discovered "
+                   + juce::String (discoveredParamAddresses.size())
+                   + " addressable OSC parameters");
+    }
+
+    void saveMidiLearnMap()
+    {
+        // Must be called on the message thread (PropertiesFile is not thread-safe)
+        juce::var v;
+        {
+            const juce::ScopedLock lock (midiLearnLock);
+            v = learnMap.toVar();
+        }
+        settingsFile.setValue ("midiLearnMap", juce::JSON::toString (v, false));
+        settingsFile.saveIfNeeded();
+    }
+
+    void loadMidiLearnMap()
+    {
+        const auto json = settingsFile.getValue ("midiLearnMap", "{}");
+        juce::var v;
+        if (juce::JSON::parse (json, v).wasOk())
+        {
+            const juce::ScopedLock lock (midiLearnLock);
+            learnMap.fromVar (v);
+        }
+    }
+
     void setStatus (const juce::String& text, juce::Colour colour)
     {
         statusLabel.setText (text, juce::dontSendNotification);
@@ -1764,6 +1976,17 @@ private:
     std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
     std::set<int> activeNotes;
     std::array<ControllerMapping, 16> controllerMappings = defaultControllerMappings;
+
+    // ── MIDI Learn ────────────────────────────────────────────────────────────
+    // Declared in this order: discoveredParamAddresses and learnMap must be
+    // constructed before midiLearnPanel (which holds references to both).
+    juce::CriticalSection  midiLearnLock;
+    juce::OSCReceiver      oscReceiver;
+    juce::StringArray      discoveredParamAddresses;
+    MidiLearnMap           learnMap;
+    std::atomic<int>       learningRow { -1 };
+    bool                   paramListDirty = false;
+    MidiLearnPanel         midiLearnPanel { discoveredParamAddresses, learnMap };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

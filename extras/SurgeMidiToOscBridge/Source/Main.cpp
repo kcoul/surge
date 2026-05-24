@@ -114,7 +114,7 @@ constexpr int defaultEncoderStep = 8;
 constexpr int whisperSampleRate = 16000;
 constexpr double vadFrameSeconds = 0.04;
 constexpr double vadPreRollSeconds = 0.25;
-constexpr double vadMinSpeechSeconds = 0.18;
+constexpr double vadMinSpeechSeconds = 0.30;
 constexpr double vadEndSilenceSeconds = 0.28;
 constexpr double vadMaxUtteranceSeconds = 2.5;
 constexpr float vadSpeechThreshold = 0.50f;
@@ -191,7 +191,7 @@ constexpr std::array<ControllerMapping, 16> defaultControllerMappings {{
     { 29, "Encoder 8 - Portamento",       "/param/a/portamento",           ControllerMode::relative, 0.0f },
 }};
 
-juce::String controllerModeName (ControllerMode mode)
+[[maybe_unused]] juce::String controllerModeName (ControllerMode mode)
 {
     return mode == ControllerMode::absolute ? "absolute" : "relative";
 }
@@ -1151,6 +1151,7 @@ private:
         std::vector<float> utterance;
         bool speechActive = false;
         size_t silenceSamples = 0;
+        size_t speechFrameSamples = 0;  // actual spoken samples, excluding preroll
 
         const auto preRollSamples = static_cast<size_t> (vadPreRollSeconds * whisperSampleRate);
         const auto minSpeechSamples = static_cast<size_t> (vadMinSpeechSeconds * whisperSampleRate);
@@ -1227,6 +1228,7 @@ private:
 
                 speechActive = true;
                 silenceSamples = 0;
+                speechFrameSamples = pcm16k.size();
                 utterance = preRoll;
                 appendTranscriptLine ("[vad start] prob="
                                       + juce::String (maxSpeechProbability, 2)
@@ -1238,6 +1240,8 @@ private:
             else
             {
                 utterance.insert (utterance.end(), pcm16k.begin(), pcm16k.end());
+                if (frameHasSpeech)
+                    speechFrameSamples += pcm16k.size();
             }
 
             if (frameHasSpeech)
@@ -1245,7 +1249,7 @@ private:
             else
                 silenceSamples += pcm16k.size();
 
-            const auto hasEnoughSpeech = utterance.size() >= minSpeechSamples;
+            const auto hasEnoughSpeech = speechFrameSamples >= minSpeechSamples;
             const auto reachedEndSilence = silenceSamples >= endSilenceSamples;
             const auto reachedMaxDuration = utterance.size() >= maxUtteranceSamples;
 
@@ -1258,6 +1262,9 @@ private:
             appendTranscriptLine ("[whisper submit] samples=" + juce::String ((int) utterance.size())
                                   + " audio_ms="
                                   + juce::String ((1000.0 * static_cast<double> (utterance.size()))
+                                                  / static_cast<double> (whisperSampleRate), 1)
+                                  + " speech_ms="
+                                  + juce::String ((1000.0 * static_cast<double> (speechFrameSamples))
                                                   / static_cast<double> (whisperSampleRate), 1)
                                   + " backend=" + voiceBackendTranscriptId (backend));
             const auto whisperStart = std::chrono::steady_clock::now();
@@ -1299,10 +1306,12 @@ private:
             appendTranscriptLine ("[whisper result] elapsed_ms="
                                   + juce::String (static_cast<int> (whisperElapsedMs.count()))
                                   + " text=\"" + text + "\"");
+
             handleRecognizedVoiceText (text);
 
             speechActive = false;
             silenceSamples = 0;
+            speechFrameSamples = 0;
             utterance.clear();
             preRoll.clear();
             whisper_vad_reset_state (vadCtx.get());

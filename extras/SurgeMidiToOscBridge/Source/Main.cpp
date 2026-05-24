@@ -1041,7 +1041,7 @@ private:
 
     void voiceWorkerLoop (VoiceTranscriptionBackend backend,
                           const std::string& modelPath,
-                          const std::string& voiceVadModelPath,
+                          [[maybe_unused]] const std::string& voiceVadModelPath,
                           [[maybe_unused]] const std::string& hailoHefName)
     {
         auto vadContextParams = whisper_vad_default_context_params();
@@ -1280,6 +1280,17 @@ private:
                 appendTranscriptLine ("[whisper error] backend="
                                       + juce::String (voiceBackendTranscriptId (backend))
                                       + " message=\"" + juce::String (exception.what()) + "\"");
+
+                if (! isWhisperCppBackend (backend))
+                {
+                    juce::MessageManager::callAsync ([this] {
+                        appendLog ("Voice recognition stopped: Hailo NPU transcription failed");
+                        stopVoiceRecognition();
+                        voiceStatusLabel.setText ("Hailo error", juce::dontSendNotification);
+                    });
+                    return;
+                }
+
                 continue;
             }
 

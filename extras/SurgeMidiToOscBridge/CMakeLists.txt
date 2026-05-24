@@ -52,8 +52,6 @@ juce_add_gui_app(SurgeMidiToOscBridge
     PRODUCT_NAME "SurgeMidiToOscBridge"
     BUNDLE_ID org.surge-synth-team.SurgeMidiToOscBridge)
 
-juce_generate_juce_header(SurgeMidiToOscBridge)
-
 target_sources(SurgeMidiToOscBridge PRIVATE
     Source/Main.cpp)
 

@@ -111,3 +111,6 @@ installer-tmp/
 .junie/
 
 **/build-*/*
+extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Tiny.hef
+extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Small.hef
+extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Base.hef

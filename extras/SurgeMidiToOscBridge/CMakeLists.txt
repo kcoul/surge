@@ -64,8 +64,8 @@ target_sources(SurgeMidiToOscBridge PRIVATE
 # the previously generated output — i.e. normal incremental-build semantics.
 # To make the embedded VAD available: run tools/prepare-bridge-resources.sh
 # (downloads the model), then reconfigure and build.
-set(BRIDGE_VAD_MODEL "${CMAKE_SOURCE_DIR}/libs/whisper.cpp/models/ggml-silero-v6.2.0.bin")
-set(BRIDGE_EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary_as_c.sh")
+set(BRIDGE_VAD_MODEL "${CMAKE_SOURCE_DIR}/surge/libs/whisper.cpp/models/ggml-silero-v6.2.0.bin")
+set(BRIDGE_EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary_as_c.cmake")
 set(BRIDGE_VAD_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(BRIDGE_EMBEDDED_VAD_H   "${BRIDGE_VAD_GEN_DIR}/embedded_vad_model.h")
 set(BRIDGE_EMBEDDED_VAD_CPP "${BRIDGE_VAD_GEN_DIR}/embedded_vad_model.cpp")
@@ -75,11 +75,12 @@ if(EXISTS "${BRIDGE_VAD_MODEL}")
     file(MAKE_DIRECTORY "${BRIDGE_VAD_GEN_DIR}")
     add_custom_command(
         OUTPUT  "${BRIDGE_EMBEDDED_VAD_H}" "${BRIDGE_EMBEDDED_VAD_CPP}"
-        COMMAND bash "${BRIDGE_EMBED_SCRIPT}"
-                    "${BRIDGE_VAD_MODEL}"
-                    "${BRIDGE_EMBEDDED_VAD_H}"
-                    "${BRIDGE_EMBEDDED_VAD_CPP}"
-                    "ggml_silero_vad_model"
+        COMMAND "${CMAKE_COMMAND}"
+                    -DINPUT=${BRIDGE_VAD_MODEL}
+                    -DOUTPUT_H=${BRIDGE_EMBEDDED_VAD_H}
+                    -DOUTPUT_CPP=${BRIDGE_EMBEDDED_VAD_CPP}
+                    -DSYMBOL=ggml_silero_vad_model
+                    -P "${BRIDGE_EMBED_SCRIPT}"
         DEPENDS "${BRIDGE_VAD_MODEL}" "${BRIDGE_EMBED_SCRIPT}"
         COMMENT "Embedding silero VAD model"
     )

@@ -114,27 +114,18 @@ if(SURGE_MIDI_OSC_BRIDGE_DOWNLOAD_MODELS)
     endif()
 endif()
 
-set(BRIDGE_EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary_as_c.cmake")
+# Embed silero VAD model via incbin (assembler .incbin — near-instant compile).
+set(_incbin_dir   "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/incbin")
 set(BRIDGE_VAD_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(BRIDGE_EMBEDDED_VAD_H   "${BRIDGE_VAD_GEN_DIR}/embedded_vad_model.h")
-set(BRIDGE_EMBEDDED_VAD_CPP "${BRIDGE_VAD_GEN_DIR}/embedded_vad_model.cpp")
 
 if(EXISTS "${BRIDGE_VAD_MODEL}")
-    message(STATUS "SurgeMidiToOscBridge: silero VAD model found — will embed if changed")
+    message(STATUS "SurgeMidiToOscBridge: silero VAD model found — embedding via incbin")
     file(MAKE_DIRECTORY "${BRIDGE_VAD_GEN_DIR}")
-    add_custom_command(
-        OUTPUT  "${BRIDGE_EMBEDDED_VAD_H}" "${BRIDGE_EMBEDDED_VAD_CPP}"
-        COMMAND "${CMAKE_COMMAND}"
-                    -DINPUT=${BRIDGE_VAD_MODEL}
-                    -DOUTPUT_H=${BRIDGE_EMBEDDED_VAD_H}
-                    -DOUTPUT_CPP=${BRIDGE_EMBEDDED_VAD_CPP}
-                    -DSYMBOL=ggml_silero_vad_model
-                    -P "${BRIDGE_EMBED_SCRIPT}"
-        DEPENDS "${BRIDGE_VAD_MODEL}" "${BRIDGE_EMBED_SCRIPT}"
-        COMMENT "Embedding silero VAD model"
-    )
-    target_sources(SurgeMidiToOscBridge PRIVATE "${BRIDGE_EMBEDDED_VAD_CPP}")
-    target_include_directories(SurgeMidiToOscBridge PRIVATE "${BRIDGE_VAD_GEN_DIR}")
+    set(VAD_MODEL_PATH "${BRIDGE_VAD_MODEL}")
+    configure_file("${_incbin_dir}/vad_model_embed.c.in"
+                   "${BRIDGE_VAD_GEN_DIR}/vad_model_embed.c" @ONLY)
+    target_sources(SurgeMidiToOscBridge PRIVATE "${BRIDGE_VAD_GEN_DIR}/vad_model_embed.c")
+    target_include_directories(SurgeMidiToOscBridge PRIVATE "${_incbin_dir}")
     target_compile_definitions(SurgeMidiToOscBridge PRIVATE BRIDGE_HAS_EMBEDDED_VAD=1)
 else()
     message(STATUS "SurgeMidiToOscBridge: no silero VAD model — enable SURGE_MIDI_OSC_BRIDGE_DOWNLOAD_MODELS or run tools/prepare-bridge-resources.sh, then reconfigure")

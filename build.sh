@@ -2,8 +2,8 @@
 # Cross-compile SurgeXT Standalone for aarch64 Ubuntu/RPi OS (RPi5) from WSL2.
 #
 # Prerequisites: see extras/SurgeMidiToOscBridge/docs/cross-compile-linux-aarch64-ubuntu-surgeXT.md
-# Note: if you already ran the bridge build.sh, juceaide is already built and
-# this script will skip Step 1 automatically.
+# Note: if you already ran extras/SurgeMidiToOscBridge/build.sh, juceaide is
+# already built — this script will detect and skip Step 1 automatically.
 #
 # Usage:
 #   ./build.sh
@@ -11,18 +11,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DIST_DIR="$SCRIPT_DIR/build/dist"
+TOOLCHAIN="$SCRIPT_DIR/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake"
+BUILD_DIR="$SCRIPT_DIR/build"
+NATIVE_BUILD="$BUILD_DIR/native"
+CROSS_BUILD="$BUILD_DIR/aarch64-linux"
+DIST_DIR="$BUILD_DIR/dist"
 
-# CMake presets must be invoked from the directory containing CMakePresets.json.
-cd "$SCRIPT_DIR"
-
-# ── Step 1: Native juceaide (skip if already built) ───────────────────────────
+# ── Step 1: Native juceaide (skip if already built by bridge build.sh) ────────
 echo "=== Step 1: Native juceaide ==="
-JUCEAIDE_EXE="$(find "$SCRIPT_DIR/libs/JUCE/build" -name "juceaide" -type f 2>/dev/null | head -1)"
+
+# Check bridge's native build first (shared juceaide).
+BRIDGE_NATIVE="$SCRIPT_DIR/extras/SurgeMidiToOscBridge/build/native"
+JUCEAIDE_EXE="$(find "$BRIDGE_NATIVE" "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
+
 if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
-    cmake --preset host-juceaide-linux
-    cmake --build --preset build-host-juceaide-linux
-    JUCEAIDE_EXE="$(find "$SCRIPT_DIR/libs/JUCE/build" -name "juceaide" -type f 2>/dev/null | head -1)"
+    cmake -S "$SCRIPT_DIR" -B "$NATIVE_BUILD" \
+        -DSURGE_HOST_JUCEAIDE_ONLY=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -G Ninja
+    cmake --build "$NATIVE_BUILD"
+    JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
     if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
         echo "ERROR: juceaide not found after build"
         exit 1
@@ -35,20 +43,32 @@ echo "  juceaide: $JUCEAIDE_EXE"
 # ── Step 2: Cross-compile SurgeXT standalone ─────────────────────────────────
 echo ""
 echo "=== Step 2: Cross-compile SurgeXT standalone for aarch64 ==="
-cmake --preset linux-aarch64-ubuntu-surge
-cmake --build --preset build-linux-aarch64-ubuntu-surge
+cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+    -DJUCE_JUCEAIDE_PATH="$JUCEAIDE_EXE" \
+    -DSURGE_BUILD_FX=OFF \
+    -DSURGE_BUILD_TESTRUNNER=OFF \
+    -DSURGE_BUILD_CLAP=OFF \
+    -DSURGE_BUILD_LV2=OFF \
+    -DSURGE_SKIP_VST3=ON \
+    -DSURGE_SKIP_LUA=TRUE \
+    -DSURGE_STANDALONE_AUTO_OSC_IN=ON \
+    -DSST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM=ON \
+    -DCMAKE_BUILD_TYPE=Release \
+    -G Ninja
+cmake --build "$CROSS_BUILD" --target surge-xt_Standalone
 
 # ── Step 3: Collect dist ──────────────────────────────────────────────────────
 mkdir -p "$DIST_DIR"
 echo ""
 echo "=== Collecting ==="
 
-src="$(find "$SCRIPT_DIR/build-linux-aarch64-ubuntu" -type f -name "SurgeXT" ! -path "*/_deps/*" 2>/dev/null | head -1)"
+src="$(find "$CROSS_BUILD" -type f -name "SurgeXT" ! -path "*/_deps/*" 2>/dev/null | head -1)"
 if [[ -n "$src" ]]; then
     cp "$src" "$DIST_DIR/SurgeXT"
     echo "  → dist/SurgeXT"
 else
-    echo "  WARNING: SurgeXT binary not found in build-linux-aarch64-ubuntu"
+    echo "  WARNING: SurgeXT binary not found in $CROSS_BUILD"
 fi
 
 echo ""

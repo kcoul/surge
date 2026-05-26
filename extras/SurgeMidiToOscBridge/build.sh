@@ -11,23 +11,27 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SURGE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DIST_DIR="$SCRIPT_DIR/build/dist"
+TOOLCHAIN="$SURGE_DIR/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake"
+BUILD_DIR="$SCRIPT_DIR/build"
+NATIVE_BUILD="$BUILD_DIR/native"
+CROSS_BUILD="$BUILD_DIR/aarch64-linux"
+DIST_DIR="$BUILD_DIR/dist"
 
 HAILO=ON
 if [[ "${1:-}" == "--no-hailo" ]]; then
     HAILO=OFF
 fi
 
-# CMake presets must be invoked from the directory containing CMakePresets.json.
-cd "$SURGE_DIR"
-
 # ── Step 1: Native juceaide (skip if already built) ───────────────────────────
 echo "=== Step 1: Native juceaide ==="
-JUCEAIDE_EXE="$(find "$SURGE_DIR/libs/JUCE/build" -name "juceaide" -type f 2>/dev/null | head -1)"
+JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
 if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
-    cmake --preset host-juceaide-linux
-    cmake --build --preset build-host-juceaide-linux
-    JUCEAIDE_EXE="$(find "$SURGE_DIR/libs/JUCE/build" -name "juceaide" -type f 2>/dev/null | head -1)"
+    cmake -S "$SURGE_DIR" -B "$NATIVE_BUILD" \
+        -DSURGE_HOST_JUCEAIDE_ONLY=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -G Ninja
+    cmake --build "$NATIVE_BUILD"
+    JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
     if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
         echo "ERROR: juceaide not found after build"
         exit 1
@@ -37,26 +41,17 @@ else
 fi
 echo "  juceaide: $JUCEAIDE_EXE"
 
-# ── Step 2: Cross-compile ─────────────────────────────────────────────────────
+# ── Step 2: Cross-compile bridge ─────────────────────────────────────────────
 echo ""
 echo "=== Step 2: Cross-compile SurgeMidiToOscBridge (Hailo=$HAILO) ==="
-
-if [[ "$HAILO" == "ON" ]]; then
-    cmake --preset linux-aarch64-ubuntu-midi-osc-bridge
-    cmake --build --preset build-linux-aarch64-ubuntu-midi-osc-bridge
-    CROSS_BUILD="$SCRIPT_DIR/build-linux-aarch64-ubuntu"
-else
-    CROSS_BUILD="$SCRIPT_DIR/build-linux-aarch64-ubuntu-no-hailo"
-    TOOLCHAIN="$SURGE_DIR/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake"
-    cmake -S "$SURGE_DIR" -B "$CROSS_BUILD" \
-        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-        -DJUCE_JUCEAIDE_PATH="$JUCEAIDE_EXE" \
-        -DSURGE_HOST_MIDI_OSC_BRIDGE_ONLY=ON \
-        -DSURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO=OFF \
-        -DCMAKE_BUILD_TYPE=Release \
-        -G Ninja
-    cmake --build "$CROSS_BUILD" --target SurgeMidiToOscBridge
-fi
+cmake -S "$SURGE_DIR" -B "$CROSS_BUILD" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+    -DJUCE_JUCEAIDE_PATH="$JUCEAIDE_EXE" \
+    -DSURGE_HOST_MIDI_OSC_BRIDGE_ONLY=ON \
+    -DSURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO="$HAILO" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -G Ninja
+cmake --build "$CROSS_BUILD" --target SurgeMidiToOscBridge
 
 # ── Step 3: Collect dist ──────────────────────────────────────────────────────
 mkdir -p "$DIST_DIR"

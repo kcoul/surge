@@ -1,26 +1,54 @@
 #!/usr/bin/env bash
-# Cross-compile SurgeXT Standalone for aarch64 Ubuntu/RPi OS (RPi5) from WSL2.
+# Cross-compile SurgeXT Standalone for aarch64 — Linux (Ubuntu/RPi OS) or QNX.
 #
-# Prerequisites: see extras/SurgeMidiToOscBridge/docs/cross-compile-linux-aarch64-ubuntu-surgeXT.md
+# Prerequisites:
+#   Linux: see extras/SurgeMidiToOscBridge/docs/cross-compile-linux-aarch64-ubuntu-surgeXT.md
+#   QNX:   QNX SDP installed, QNX_HOST and QNX_TARGET exported, qcc/q++ in PATH
+#
 # Tip: if you already ran extras/SurgeMidiToOscBridge/build.sh, Step 1 is
 # skipped automatically — both scripts share the same native juceaide.
 #
 # Usage:
-#   ./build.sh
+#   ./build.sh                   # Linux (default)
+#   ./build.sh --target qnx      # QNX
 
 set -euo pipefail
 
+TARGET=linux
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target) TARGET="$2"; shift 2 ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+done
+
+if [[ "$TARGET" != "linux" && "$TARGET" != "qnx" ]]; then
+    echo "ERROR: --target must be 'linux' or 'qnx'"
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JUCE_DIR="$SCRIPT_DIR/libs/JUCE"
-TOOLCHAIN="$SCRIPT_DIR/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake"
 
 # Shared juceaide lives in the bridge's native build so both scripts stay in sync.
 BRIDGE_NATIVE="$SCRIPT_DIR/extras/SurgeMidiToOscBridge/build/native"
 NATIVE_BUILD="$BRIDGE_NATIVE"
 
 BUILD_DIR="$SCRIPT_DIR/build"
-CROSS_BUILD="$BUILD_DIR/aarch64-linux"
-DIST_DIR="$BUILD_DIR/dist"
+
+if [[ "$TARGET" == "qnx" ]]; then
+    if [[ -z "${QNX_HOST:-}" || -z "${QNX_TARGET:-}" ]]; then
+        echo "ERROR: QNX_HOST and QNX_TARGET must be set (source your QNX SDP environment first)"
+        exit 1
+    fi
+    TOOLCHAIN="$JUCE_DIR/extras/Build/CMake/QNXAarch64Toolchain.cmake"
+    CROSS_BUILD="$BUILD_DIR/aarch64-qnx"
+    DIST_DIR="$BUILD_DIR/dist-qnx"
+else
+    TOOLCHAIN="$SCRIPT_DIR/cmake/linux-aarch64-ubuntu-crosscompile-toolchain.cmake"
+    CROSS_BUILD="$BUILD_DIR/aarch64-linux"
+    DIST_DIR="$BUILD_DIR/dist-linux"
+fi
 
 # ── Step 1: Build host juceaide directly from JUCE (shared with bridge) ───────
 echo "=== Step 1: Native juceaide ==="
@@ -42,7 +70,7 @@ echo "  juceaide: $JUCEAIDE_EXE"
 
 # ── Step 2: Cross-compile SurgeXT standalone ─────────────────────────────────
 echo ""
-echo "=== Step 2: Cross-compile SurgeXT standalone for aarch64 ==="
+echo "=== Step 2: Cross-compile SurgeXT standalone for aarch64-$TARGET ==="
 echo "  configuring..."
 cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
@@ -68,12 +96,11 @@ echo "=== Collecting ==="
 src="$(find "$CROSS_BUILD" -type f -name "SurgeXT" ! -path "*/_deps/*" 2>/dev/null | head -1)"
 if [[ -n "$src" ]]; then
     cp "$src" "$DIST_DIR/SurgeXT"
-    echo "  -> dist/SurgeXT"
+    echo "  -> $DIST_DIR/SurgeXT"
 else
     echo "  WARNING: SurgeXT binary not found in $CROSS_BUILD"
 fi
 
 echo ""
 echo "=== Done ==="
-echo "  Run:  python deploy.py --target-ip <pi-ip>"
-echo "  First time:  python deploy.py --target-ip <pi-ip> --with-data  (~490 MB)"
+echo "  Run:  python deploy.py --target-ip <pi-ip> --dist $DIST_DIR"

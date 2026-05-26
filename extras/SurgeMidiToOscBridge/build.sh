@@ -27,12 +27,10 @@ fi
 echo "=== Step 1: Native juceaide ==="
 JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1 || true)"
 if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
-    echo "  configuring JUCE for host..."
+    echo "  configuring JUCE for host (builds juceaide during configure)..."
     cmake -S "$JUCE_DIR" -B "$NATIVE_BUILD" \
         -DCMAKE_BUILD_TYPE=Release \
         -G Ninja
-    echo "  building juceaide..."
-    cmake --build "$NATIVE_BUILD" --target juceaide
     JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1 || true)"
     if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
         echo "ERROR: juceaide not found after build"

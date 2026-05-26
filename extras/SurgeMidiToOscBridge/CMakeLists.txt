@@ -170,7 +170,6 @@ target_link_libraries(SurgeMidiToOscBridge PRIVATE
     juce::juce_osc
     whisper
     juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")

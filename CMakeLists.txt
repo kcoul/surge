@@ -22,6 +22,7 @@ project(Surge VERSION 1.4.0 LANGUAGES C CXX)
 
 option(SURGE_HOST_JUCEAIDE_ONLY "Configure only the host-side JUCE juceaide helper" OFF)
 option(SURGE_HOST_MIDI_OSC_BRIDGE_ONLY "Configure only the host-side MIDI to OSC bridge utility" OFF)
+option(SURGE_BUILD_MIDI_OSC_BRIDGE "Build the MIDI-to-OSC bridge alongside SurgeXT" ON)
 
 if(SURGE_HOST_JUCEAIDE_ONLY)
   set(SURGE_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE STRING "Path to JUCE library source tree")
@@ -323,7 +324,9 @@ add_custom_command(TARGET code-quality-pipeline-checks
   COMMAND git ls-files -- ${CLANG_FORMAT_GLOBS} | xargs clang-format-12 --dry-run --Werror
 )
 
-message(STATUS "Adding MIDI to OSC bridge")
-add_subdirectory(extras/SurgeMidiToOscBridge)
+if(SURGE_BUILD_MIDI_OSC_BRIDGE)
+  message(STATUS "Adding MIDI to OSC bridge")
+  add_subdirectory(extras/SurgeMidiToOscBridge)
+endif()
 
 # }}}

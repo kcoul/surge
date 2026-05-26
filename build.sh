@@ -38,7 +38,13 @@ BUILD_DIR="$SCRIPT_DIR/build"
 
 if [[ "$TARGET" == "qnx" ]]; then
     if [[ -z "${QNX_HOST:-}" || -z "${QNX_TARGET:-}" ]]; then
-        echo "ERROR: QNX_HOST and QNX_TARGET must be set (source your QNX SDP environment first)"
+        echo "ERROR: QNX_HOST and QNX_TARGET are not set."
+        echo "       Run: source ~/qnx800/qnxsdp-env.sh"
+        exit 1
+    fi
+    if ! command -v qcc &>/dev/null; then
+        echo "ERROR: qcc not found in PATH — QNX SDP tools not active."
+        echo "       Run: source ~/qnx800/qnxsdp-env.sh"
         exit 1
     fi
     TOOLCHAIN="$JUCE_DIR/extras/Build/CMake/QNXAarch64Toolchain.cmake"
@@ -73,7 +79,8 @@ echo ""
 echo "=== Step 2: Cross-compile SurgeXT standalone for aarch64-$TARGET ==="
 echo "  toolchain: $TOOLCHAIN"
 echo "  build dir: $CROSS_BUILD"
-echo "  configuring..."
+echo "  configuring (clean configure — removing stale cache if present)..."
+rm -f "$CROSS_BUILD/CMakeCache.txt"
 cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DJUCE_JUCEAIDE_PATH="$JUCEAIDE_EXE" \

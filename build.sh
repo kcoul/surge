@@ -24,7 +24,7 @@ DIST_DIR="$BUILD_DIR/dist"
 
 # ── Step 1: Build host juceaide directly from JUCE (shared with bridge) ───────
 echo "=== Step 1: Native juceaide ==="
-JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
+JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1 || true)"
 if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
     echo "  configuring JUCE for host..."
     cmake -S "$JUCE_DIR" -B "$NATIVE_BUILD" \
@@ -32,7 +32,7 @@ if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
         -G Ninja
     echo "  building juceaide..."
     cmake --build "$NATIVE_BUILD" --target juceaide
-    JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1)"
+    JUCEAIDE_EXE="$(find "$NATIVE_BUILD" -name "juceaide" -type f 2>/dev/null | head -1 || true)"
     if [[ -z "$JUCEAIDE_EXE" || ! -x "$JUCEAIDE_EXE" ]]; then
         echo "ERROR: juceaide not found after build"
         exit 1

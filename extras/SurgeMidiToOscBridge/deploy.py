@@ -12,8 +12,8 @@ After deploy, on the Pi:
     ~/bridge/SurgeMidiToOscBridge [--model tiny|base|small]
 """
 
-import glob
 import os
+import stat
 import getpass
 import argparse
 
@@ -53,12 +53,22 @@ def main():
 
     sftp = client.open_sftp()
 
+    def sftp_put_if_changed(local, remote, label):
+        local_size = os.path.getsize(local)
+        try:
+            remote_size = sftp.stat(remote).st_size
+            if remote_size == local_size:
+                print(f"  ✓ {label} (unchanged)")
+                return
+        except FileNotFoundError:
+            pass
+        print(f"  → {label}")
+        sftp.put(local, remote)
+
     remote_bin = deploy_dir.rstrip('/') + '/SurgeMidiToOscBridge'
-    print(f"  → SurgeMidiToOscBridge")
-    sftp.put(binary, remote_bin)
+    sftp_put_if_changed(binary, remote_bin, "SurgeMidiToOscBridge")
     sftp.chmod(remote_bin, 0o755)
 
-    # Whisper models (CPU/GPU backend).
     models_src = os.path.join(_DIST, "models")
     if os.path.isdir(models_src):
         for dirpath, _, filenames in os.walk(models_src):
@@ -68,8 +78,7 @@ def main():
             for fname in sorted(filenames):
                 local  = os.path.join(dirpath, fname)
                 remote = remote_dir + '/' + fname
-                print(f"  → {rel_dir}/{fname}")
-                sftp.put(local, remote)
+                sftp_put_if_changed(local, remote, f"{rel_dir}/{fname}")
 
     sftp.close()
     client.close()

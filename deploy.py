@@ -1,9 +1,10 @@
 """
 deploy.py
-Deploys SurgeXT Standalone to an RPi5 target via SFTP (binary) and rsync (data).
+Deploys SurgeXT Standalone to an RPi target via SFTP (binary) and rsync (data).
 
-    python deploy.py --target-ip 192.168.1.100
-    python deploy.py --target-ip 192.168.1.100 --with-data   # first time: ~490 MB
+    python deploy.py --target-ip 192.168.1.100 --dist build/dist-linux
+    python deploy.py --target-ip 192.168.1.100 --dist build/dist-qnx
+    python deploy.py --target-ip 192.168.1.100 --dist build/dist-linux --with-data
 
 NOTE: stop any running SurgeXT processes on the target before deploying.
 
@@ -30,29 +31,33 @@ except ImportError:
     raise SystemExit("pip install paramiko")
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_DIST       = os.path.join(_SCRIPT_DIR, "build", "dist")
 _DATA_SRC   = os.path.join(_SCRIPT_DIR, "resources", "data")
 
 def main():
-    parser = argparse.ArgumentParser(description="Deploy SurgeXT Standalone to RPi5")
+    parser = argparse.ArgumentParser(description="Deploy SurgeXT Standalone to RPi")
     parser.add_argument("--target-ip",   required=True,
                         help="Target IP or hostname (e.g. 192.168.1.100 or user@192.168.1.100)")
+    parser.add_argument("--dist",        default=os.path.join(_SCRIPT_DIR, "build", "dist-linux"),
+                        help="Dist directory produced by build.sh (default: build/dist-linux)")
+    parser.add_argument("--user",        default="root",
+                        help="SSH username (default: root)")
     parser.add_argument("--deploy-path", default="~/surge",
                         help="Destination directory on target (default: ~/surge)")
     parser.add_argument("--with-data",   action="store_true",
                         help="Also sync factory data (~490 MB, first time only)")
     args = parser.parse_args()
 
-    binary = os.path.join(_DIST, "SurgeXT")
+    binary = os.path.join(args.dist, "SurgeXT")
     if not os.path.exists(binary):
-        raise SystemExit(f"Binary not found: {binary}\nRun  ./build.sh  first.")
+        raise SystemExit(f"Binary not found: {binary}\nRun  ./build.sh [--target linux|qnx]  first.")
 
     user, _, host = args.target_ip.rpartition('@')
-    password = getpass.getpass(f"Password for {args.target_ip}: ")
+    user = user or args.user
+    password = getpass.getpass(f"Password for {user}@{host}: ")
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username=user or None, password=password)
+    client.connect(host, username=user, password=password)
 
     deploy_dir = args.deploy_path
     if '~' in deploy_dir:
@@ -76,7 +81,7 @@ def main():
             print(f"WARNING: factory data not found at {_DATA_SRC} — skipping --with-data")
         else:
             data_dest = deploy_dir.rstrip('/') + '/SurgeXTData/'
-            remote_target = f"{(user + '@') if user else ''}{host}:{data_dest}"
+            remote_target = f"{user}@{host}:{data_dest}"
             print(f"\n  Syncing factory data to {remote_target} ...")
             print(f"  (rsync via SSH — this may take a few minutes on first run)")
             # rsync trailing slash on source: copies contents, not the dir itself.

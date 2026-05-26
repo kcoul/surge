@@ -71,6 +71,8 @@ echo "  juceaide: $JUCEAIDE_EXE"
 # ── Step 2: Cross-compile SurgeXT standalone ─────────────────────────────────
 echo ""
 echo "=== Step 2: Cross-compile SurgeXT standalone for aarch64-$TARGET ==="
+echo "  toolchain: $TOOLCHAIN"
+echo "  build dir: $CROSS_BUILD"
 echo "  configuring..."
 cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
@@ -103,4 +105,9 @@ fi
 
 echo ""
 echo "=== Done ==="
-echo "  Run:  python deploy.py --target-ip <pi-ip> --dist $DIST_DIR"
+if [[ "$TARGET" == "qnx" ]]; then
+    echo "  Run:  python deploy.py --target-ip root@<pi-ip> --dist $DIST_DIR"
+    echo "  NOTE: QNX requires root@ prefix — plain IP will use your local username and fail"
+else
+    echo "  Run:  python deploy.py --target-ip <pi-ip> --dist $DIST_DIR"
+fi

@@ -168,7 +168,6 @@ struct VoiceCommandAction
 enum class VoiceTranscriptionBackend
 {
     whisperCpu = 1,
-    whisperGpu = 2,
     hailoNpu = 3
 };
 
@@ -298,8 +297,6 @@ juce::String voiceBackendName (VoiceTranscriptionBackend backend)
     {
     case VoiceTranscriptionBackend::whisperCpu:
         return "whisper.cpp CPU";
-    case VoiceTranscriptionBackend::whisperGpu:
-        return "whisper.cpp GPU";
     case VoiceTranscriptionBackend::hailoNpu:
         return "Hailo NPU";
     }
@@ -313,8 +310,6 @@ const char* voiceBackendTranscriptId (VoiceTranscriptionBackend backend)
     {
     case VoiceTranscriptionBackend::whisperCpu:
         return "whisper-cpu";
-    case VoiceTranscriptionBackend::whisperGpu:
-        return "whisper-gpu";
     case VoiceTranscriptionBackend::hailoNpu:
         return "hailo-npu";
     }
@@ -337,8 +332,6 @@ VoiceTranscriptionBackend voiceBackendFromId (int id)
     {
     case static_cast<int> (VoiceTranscriptionBackend::whisperCpu):
         return VoiceTranscriptionBackend::whisperCpu;
-    case static_cast<int> (VoiceTranscriptionBackend::whisperGpu):
-        return VoiceTranscriptionBackend::whisperGpu;
     case static_cast<int> (VoiceTranscriptionBackend::hailoNpu):
 #if BRIDGE_HAS_HAILO
         return VoiceTranscriptionBackend::hailoNpu;
@@ -352,8 +345,7 @@ VoiceTranscriptionBackend voiceBackendFromId (int id)
 
 bool isWhisperCppBackend (VoiceTranscriptionBackend backend)
 {
-    return backend == VoiceTranscriptionBackend::whisperCpu
-        || backend == VoiceTranscriptionBackend::whisperGpu;
+    return backend == VoiceTranscriptionBackend::whisperCpu;
 }
 
 std::optional<VoiceCommandAction> voiceCommandActionForText (const juce::String& normalized)
@@ -522,8 +514,6 @@ public:
 
         voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::whisperCpu),
                                  static_cast<int> (VoiceTranscriptionBackend::whisperCpu));
-        voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::whisperGpu),
-                                 static_cast<int> (VoiceTranscriptionBackend::whisperGpu));
 #if BRIDGE_HAS_HAILO
         voiceBackendBox.addItem (voiceBackendName (VoiceTranscriptionBackend::hailoNpu),
                                  static_cast<int> (VoiceTranscriptionBackend::hailoNpu));
@@ -1084,7 +1074,7 @@ private:
         if (isWhisperCppBackend (backend))
         {
             auto cparams = whisper_context_default_params();
-            cparams.use_gpu = backend == VoiceTranscriptionBackend::whisperGpu;
+            cparams.use_gpu = false;
 
             whisperCtx.reset (whisper_init_from_file_with_params (modelPath.c_str(), cparams));
             if (whisperCtx == nullptr)

@@ -45,7 +45,10 @@ if(SURGE_MIDI_OSC_BRIDGE_ENABLE_HAILO)
 else()
     message(STATUS "SurgeMidiToOscBridge: building without HailoRT backend")
 endif()
-find_package(CURL REQUIRED)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(CURL REQUIRED)
+endif()
 
 option(SURGE_MIDI_OSC_BRIDGE_DOWNLOAD_MODELS
        "Download model files during configure if missing" ON)
@@ -151,10 +154,14 @@ target_link_libraries(SurgeMidiToOscBridge PRIVATE
     juce::juce_gui_extra
     juce::juce_osc
     whisper
-    CURL::libcurl
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(SurgeMidiToOscBridge PRIVATE
+            CURL::libcurl)
+endif()
 
 if(BRIDGE_HAS_HAILO)
     target_link_libraries(SurgeMidiToOscBridge PRIVATE HailoRT::libhailort)

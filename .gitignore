@@ -114,3 +114,4 @@ installer-tmp/
 extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Tiny.hef
 extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Small.hef
 extras/SurgeMidiToOscBridge/Resources/models/hailo10h/Whisper-Base.hef
+surge/libs/whisper.cpp/models/ggml-silero-v6.2.0.bin

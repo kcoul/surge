@@ -3,8 +3,10 @@ deploy.py
 Deploys SurgeXT Standalone to an RPi target via SFTP (binary) and rsync (data).
 
     python deploy.py --target-ip 192.168.1.100 --dist build/dist-linux
-    python deploy.py --target-ip 192.168.1.100 --dist build/dist-qnx
     python deploy.py --target-ip 192.168.1.100 --dist build/dist-linux --with-data
+
+    # QNX: root@ prefix is required — SSH on QNX only accepts root by default
+    python deploy.py --target-ip root@192.168.1.100 --dist build/dist-qnx
 
 NOTE: stop any running SurgeXT processes on the target before deploying.
 

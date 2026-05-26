@@ -91,6 +91,7 @@ cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
     -DSURGE_SKIP_VST3=ON \
     -DSURGE_SKIP_LUA=TRUE \
     -DSURGE_BUILD_MIDI_OSC_BRIDGE=$([ "$TARGET" == "qnx" ] && echo OFF || echo ON) \
+    $([ "$TARGET" == "qnx" ] && echo "-DFREETYPE_INCLUDE_DIRS=$QNX_TARGET/usr/include/freetype2 -DFREETYPE_LIBRARY=$QNX_TARGET/aarch64le/usr/lib/libfreetype.so.24") \
     -DSURGE_STANDALONE_AUTO_OSC_IN=ON \
     -DSST_PLUGININFRA_FILESYSTEM_FORCE_PLATFORM=ON \
     -DCMAKE_BUILD_TYPE=Release \

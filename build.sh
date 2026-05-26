@@ -58,7 +58,7 @@ cmake -S "$SCRIPT_DIR" -B "$CROSS_BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -G Ninja
 echo "  building..."
-cmake --build "$CROSS_BUILD" --target surge-xt_Standalone
+cmake --build "$CROSS_BUILD" --target surge-xt_Standalone --parallel 4
 
 # ── Step 3: Collect dist ──────────────────────────────────────────────────────
 mkdir -p "$DIST_DIR"

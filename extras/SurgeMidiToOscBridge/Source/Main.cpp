@@ -1355,10 +1355,17 @@ private:
 
 #if BRIDGE_HAS_HAILO
     juce::String transcribeVoiceChunk (hailort::genai::Speech2Text& speech2Text,
-                                       const std::vector<float>& samples)
+                                       const std::vector<float>& samplesIn)
     {
-        if (samples.empty())
+        if (samplesIn.empty())
             return {};
+
+        // Pad to Whisper's native 30-second window with silence.
+        // Without this the model carries decoder token context across calls,
+        // causing alternating good/garbage transcriptions.
+        constexpr size_t kWhisperWindow = 30 * 16000;
+        std::vector<float> samples = samplesIn;
+        samples.resize (kWhisperWindow, 0.0f);
 
         auto generatorParams = speech2Text.create_generator_params()
                                    .expect ("Failed to create Hailo Speech2Text generator params");

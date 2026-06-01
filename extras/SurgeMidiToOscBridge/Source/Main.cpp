@@ -5,8 +5,15 @@
 #define BRIDGE_HAS_HAILO 0
 #endif
 #if BRIDGE_HAS_HAILO
+// On MSVC, the JUCE module *headers* (.h) do not pull in <windows.h> — only
+// the unity-build .cpp files do, and those are separate translation units.
+// HailoRT's platform.h includes <windef.h> directly, which triggers an
+// architecture check in <winnt.h> before the predefined _M_AMD64 etc. macros
+// are visible.  Include <windows.h> explicitly first to satisfy that check.
+// NOMINMAX is already defined via target_compile_definitions in CMakeLists.
+//
 // Windows COM headers (included transitively via HailoRT's platform.h →
-// winsock2.h → basetyps.h) define `interface` as `struct`.  This conflicts
+// windef.h → winnt.h) also define `interface` as `struct`.  This conflicts
 // with HailoRT's use of `interface` as a parameter name in hailort_defaults.hpp.
 //
 // Workaround: pre-define the hailort_defaults.hpp include guard so that
@@ -16,6 +23,7 @@
 //
 // This avoids modifying the installed SDK headers.
 #ifdef _WIN32
+#  include <windows.h>
 #  define _HAILO_HAILORT_DEFAULTS_HPP_   // suppress inclusion by hailort.hpp
 #endif
 #include <hailo/genai/speech2text/speech2text.hpp>

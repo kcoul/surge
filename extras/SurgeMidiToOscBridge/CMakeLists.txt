@@ -158,7 +158,12 @@ target_compile_definitions(SurgeMidiToOscBridge PRIVATE
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_compile_definitions(SurgeMidiToOscBridge PRIVATE
-    NOMINMAX=1)
+        NOMINMAX=1
+        # HailoRT ships a Release DLL.  std::string is 16 bytes larger in MSVC
+        # Debug builds due to iterator-debug overhead, shifting Expected<T>'s
+        # m_status field and causing 0xCCCCCCCC reads across the DLL boundary.
+        # Disabling iterator debugging matches the Release layout so Debug builds work.
+        $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>)
 endif()
 
 target_compile_options(SurgeMidiToOscBridge PRIVATE

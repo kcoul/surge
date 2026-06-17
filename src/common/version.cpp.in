@@ -35,6 +35,7 @@ namespace Surge
 
    const char* Build::GitHash = "@GIT_COMMIT_HASH@";
    const char* Build::GitBranch = "@GIT_BRANCH@";
+   const char* Build::JuceGitHash = "@SURGE_JUCE_HASH@";
 
    const char* Build::CMAKE_INSTALL_PREFIX = "@CMAKE_INSTALL_PREFIX@";
 }

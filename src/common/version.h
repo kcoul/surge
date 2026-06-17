@@ -40,6 +40,7 @@ struct Build
 
     static const char *GitHash;
     static const char *GitBranch;
+    static const char *JuceGitHash;
 
     static const char *BuildNumberStr;
 

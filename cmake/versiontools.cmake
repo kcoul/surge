@@ -43,6 +43,23 @@ if ("${GIT_COMMIT_HASH}" STREQUAL "")
     set(GIT_COMMIT_HASH "git-no-commit")
 endif ()
 
+# Commit hash of the JUCE submodule we are actually building against, so the
+# build provenance of our forked JUCE (e.g. the QNX dirty-region present path)
+# is visible in-app and we can confirm the right JUCE was compiled in.
+set(SURGE_JUCE_HASH "juce-no-commit")
+if (Git_FOUND AND EXISTS ${SURGESRC}/libs/JUCE/.git)
+    execute_process(
+            COMMAND ${GIT_EXECUTABLE} -C ${SURGESRC}/libs/JUCE rev-parse --short HEAD
+            OUTPUT_VARIABLE SURGE_JUCE_HASH_RAW
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+    )
+    if (NOT "${SURGE_JUCE_HASH_RAW}" STREQUAL "")
+        set(SURGE_JUCE_HASH "${SURGE_JUCE_HASH_RAW}")
+    endif ()
+endif ()
+message(STATUS "  JUCE submodule hash is ${SURGE_JUCE_HASH}")
+
 if (WIN32)
     set(SURGE_BUILD_ARCH "x86")
 else ()

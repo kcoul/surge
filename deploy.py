@@ -8,7 +8,11 @@ Deploys SurgeXT Standalone to an RPi target via SFTP (binary) and rsync (data).
     # QNX: root@ prefix is required — SSH on QNX only accepts root by default
     python deploy.py --target-ip root@192.168.1.100 --dist build/dist-qnx
 
+    # Fetch the on-target SurgeXT.log back to the host (no redeploy):
+    python deploy.py --target-ip root@192.168.1.100 --no-deploy --pull-log
+
 NOTE: stop any running SurgeXT processes on the target before deploying.
+NOTE: SurgeXT.log is written next to the binary, i.e. <deploy-path>/SurgeXT.log.
 
 Portable layout on target:
     ~/surge/
@@ -47,10 +51,16 @@ def main():
                         help="Destination directory on target (default: ~/surge)")
     parser.add_argument("--with-data",   action="store_true",
                         help="Also sync factory data (~490 MB, first time only)")
+    parser.add_argument("--no-deploy",    action="store_true",
+                        help="Skip pushing the binary (use with --pull-log to just fetch the log)")
+    parser.add_argument("--pull-log",     action="store_true",
+                        help="Download <deploy-path>/SurgeXT.log back to a timestamped file in the CWD")
     args = parser.parse_args()
 
+    deploy = not args.no_deploy
+
     binary = os.path.join(args.dist, "SurgeXT")
-    if not os.path.exists(binary):
+    if deploy and not os.path.exists(binary):
         raise SystemExit(f"Binary not found: {binary}\nRun  ./build.sh [--target linux|qnx]  first.")
 
     user, _, host = args.target_ip.rpartition('@')
@@ -66,40 +76,58 @@ def main():
         _, stdout, _ = client.exec_command('echo $HOME')
         home = stdout.read().decode().strip()
         deploy_dir = deploy_dir.replace('~', home)
+    deploy_dir = deploy_dir.rstrip('/')
 
-    client.exec_command(f'mkdir -p "{deploy_dir}"')
+    if deploy:
+        client.exec_command(f'mkdir -p "{deploy_dir}"')
 
-    sftp = client.open_sftp()
+        sftp = client.open_sftp()
 
-    remote_bin = deploy_dir.rstrip('/') + '/SurgeXT'
-    print(f"  → SurgeXT")
-    sftp.put(binary, remote_bin)
-    sftp.chmod(remote_bin, 0o755)
+        remote_bin = deploy_dir + '/SurgeXT'
+        print(f"  → SurgeXT")
+        sftp.put(binary, remote_bin)
+        sftp.chmod(remote_bin, 0o755)
 
-    sftp.close()
+        sftp.close()
 
-    if args.with_data:
-        if not os.path.isdir(_DATA_SRC):
-            print(f"WARNING: factory data not found at {_DATA_SRC} — skipping --with-data")
-        else:
-            data_dest = deploy_dir.rstrip('/') + '/SurgeXTData/'
-            remote_target = f"{user}@{host}:{data_dest}"
-            print(f"\n  Syncing factory data to {remote_target} ...")
-            print(f"  (rsync via SSH — this may take a few minutes on first run)")
-            # rsync trailing slash on source: copies contents, not the dir itself.
-            subprocess.run(
-                ["rsync", "-avz", "--progress",
-                 f"--rsh=ssh -o StrictHostKeyChecking=no",
-                 _DATA_SRC.rstrip('/') + '/',
-                 remote_target],
-                check=True)
-            print(f"  → SurgeXTData/ synced")
+        if args.with_data:
+            if not os.path.isdir(_DATA_SRC):
+                print(f"WARNING: factory data not found at {_DATA_SRC} — skipping --with-data")
+            else:
+                data_dest = deploy_dir + '/SurgeXTData/'
+                remote_target = f"{user}@{host}:{data_dest}"
+                print(f"\n  Syncing factory data to {remote_target} ...")
+                print(f"  (rsync via SSH — this may take a few minutes on first run)")
+                # rsync trailing slash on source: copies contents, not the dir itself.
+                subprocess.run(
+                    ["rsync", "-avz", "--progress",
+                     f"--rsh=ssh -o StrictHostKeyChecking=no",
+                     _DATA_SRC.rstrip('/') + '/',
+                     remote_target],
+                    check=True)
+                print(f"  → SurgeXTData/ synced")
+
+    if args.pull_log:
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        # Land it in the current working directory so it's easy to find.
+        local_log = os.path.abspath(f"SurgeXT-{host.replace(':', '_')}-{ts}.log")
+        remote_log = f"{deploy_dir}/SurgeXT.log"
+        sftp = client.open_sftp()
+        try:
+            sftp.get(remote_log, local_log)
+            print(f"\nPulled log → {local_log}")
+        except FileNotFoundError:
+            print(f"\nNo log at {remote_log} (has SurgeXT run? check --deploy-path matches where it ran)")
+        finally:
+            sftp.close()
 
     client.close()
 
-    print(f"\nDeployed to {args.target_ip}:{deploy_dir}")
-    print(f"\nTo run on the Pi:")
-    print(f"  {deploy_dir}/SurgeXT")
+    if deploy:
+        print(f"\nDeployed to {args.target_ip}:{deploy_dir}")
+        print(f"\nTo run on the Pi:")
+        print(f"  {deploy_dir}/SurgeXT")
 
 if __name__ == "__main__":
     main()
